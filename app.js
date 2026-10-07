@@ -15,7 +15,7 @@ const AUTH = {
   client_id: "0cf32ba0-241d-4518-aa93-039664318a28",
   tenant: "22e3bb8f-9a96-48bd-99f8-f652d83d904c",
   scopes: ["openid", "profile", "email"],
-  redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = u.search; return u.href; })(),
+  redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = ""; return u.href; })(),
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -87,6 +87,7 @@ function getLocation() {
 }
 
 // ---------- identity (Teams SSO → PKCE fallback; see SPEC.md §3) ----------
+let AUTH_ERR = null; // last sign-in failure reason, shown on the auth screen
 function getMsal() {
   if (window.__msal) return window.__msal;
   if (!window.msal) return null;
@@ -103,14 +104,22 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  // MSAL v5 renamed handleRedirectPromise -> initialize; support both
-  if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
+  // MSAL v5 renamed handleRedirectPromise -> initialize; support both.
+  // The ?code= return trip MUST complete here; on failure record the reason
+  // (AUTH_ERR) so the auth screen shows why instead of looping silently.
+  try {
+    if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
+  } catch (e) {
+    AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
+    console.warn("pkce initialize:", e);
+    return null;
+  }
   const accounts = m.getAllAccounts();
   if (!accounts.length) return null;
   try {
     const r = await m.acquireTokenSilent({ account: accounts[0], scopes: AUTH.scopes });
     return r.idToken || null;
-  } catch (e) { console.warn("acquireTokenSilent:", e); return null; }
+  } catch (e) { AUTH_ERR = (e && e.errorCode) || e.message || String(e); console.warn("acquireTokenSilent:", e); return null; }
 }
 function pkceLogin() {
   const m = getMsal();
@@ -151,6 +160,8 @@ function showAuthScreen(mode, email) {
   if (email) $("#unlinked-email").textContent = email;
   document.querySelector("main").style.display = "none";
   const b = document.querySelector("header nav"); if (b) b.style.display = "none";
+  const ae = $("#auth-err");
+  if (ae) { ae.textContent = AUTH_ERR ? "Sign-in error — " + AUTH_ERR : ""; ae.style.display = AUTH_ERR ? "" : "none"; }
 }
 
 // ---------- state ----------
