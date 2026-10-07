@@ -15,7 +15,7 @@ const AUTH = {
   client_id: "0cf32ba0-241d-4518-aa93-039664318a28",
   tenant: "22e3bb8f-9a96-48bd-99f8-f652d83d904c",
   scopes: ["openid", "profile", "email"],
-  redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = u.search; return u.href; })(),
+  redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = ""; return u.href; })(),
 };
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -87,6 +87,7 @@ function getLocation() {
 }
 
 // ---------- identity (Teams SSO → PKCE fallback; see SPEC.md §3) ----------
+let AUTH_ERR = null; // last sign-in failure reason, shown on the auth screen
 function getMsal() {
   if (window.__msal) return window.__msal;
   if (!window.msal) return null;
@@ -103,43 +104,170 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  // MSAL v5 renamed handleRedirectPromise -> initialize; support both
-  if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
-  const accounts = m.getAllAccounts();
-  if (!accounts.length) return null;
+  // MSAL v5: initialize() bootstraps storage only (does NOT process the hash).
+  try { await m.initialize(); } catch (e) { /* non-fatal */ }
+  // AAD returns with #code=...&state=... in the hash. We do NOT use MSAL's
+  // browser-side handleRedirectPromise: AAD refuses browser redemption of PKCE
+  // codes for Web-registered apps (AADSTS9002326, SPA-only). Instead we relay
+  // the one-time code + PKCE verifier to our Worker, which redeems it
+  // server-side (the classic allowed path) and returns the AAD id_token.
+  const hash = location.hash;
+  const codeM = hash.match(/code=([^&]+)/);
+  const stateM = hash.match(/state=([^&]+)/);
+  if (!codeM) return null; // fresh load — nothing to exchange
+  const b64u = (s) => { let x = String(s).replace(/-/g, "+").replace(/_/g, "/"); while (x.length % 4) x += "="; return atob(x); };
+  let verifier = null, expectedState = null;
   try {
-    const r = await m.acquireTokenSilent({ account: accounts[0], scopes: AUTH.scopes });
-    return r.idToken || null;
-  } catch (e) { console.warn("acquireTokenSilent:", e); return null; }
+    const vRaw = sessionStorage.getItem("msal." + AUTH.client_id + ".code.verifier");
+    if (vRaw) verifier = b64u(vRaw);
+    const pRaw = sessionStorage.getItem("msal." + AUTH.client_id + ".request.params");
+    if (pRaw) { const p = JSON.parse(b64u(pRaw)); if (p.state) expectedState = JSON.parse(b64u(p.state)).id || null; }
+  } catch (e) { console.warn("read msal temp state:", e); }
+  // CSRF guard: returned state must equal the state MSAL sent (when both parse)
+  if (stateM && expectedState) {
+    let actual = null;
+    try { actual = JSON.parse(b64u(decodeURIComponent(stateM[1]))).id; } catch (e) { }
+    if (actual && actual !== expectedState) { AUTH_ERR = "state mismatch (csrf)"; return null; }
+  }
+  if (!verifier) { AUTH_ERR = "pkce verifier missing"; return null; }
+  try {
+    const res = await fetch(API_BASE + "/api/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: decodeURIComponent(codeM[1]), verifier, redirect_uri: AUTH.redirect_uri }),
+    });
+    const j = await res.json();
+    if (j.id_token) {
+      // consume the code+state so a refresh can't re-attempt the (single-use) code
+      history.replaceState(null, "", location.pathname + location.search);
+      return j.id_token;
+    }
+    AUTH_ERR = (j.error || "token exchange failed") + (j.description ? ": " + j.description : "");
+    return null;
+  } catch (e) { AUTH_ERR = e.message || String(e); return null; }
 }
-function pkceLogin() {
+async function pkceLogin() {
+  const inTeams = await teamsContextProbe();
+  if (inTeams) {
+    // Inside Teams (desktop or mobile): SSO dialog, else Teams-injected identity.
+    AUTH_ERR = "";
+    const btn = document.getElementById("btn-auth-login"); if (btn) btn.disabled = true;
+    teamsSsoToken()
+    .then(t => t || teamsContextToken()) // SSO token, else Teams-injected identity
+    .then(t => {
+      if (t) {
+        ID_TOKEN = t;
+        return refreshAll().catch(e => {
+          if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
+          AUTH_ERR = (e.message || String(e)) + " (after sign-in)"; showAuthScreen("login");
+        });
+      }
+      AUTH_ERR = "No Teams identity available (SSO and context both failed)"; showAuthScreen("login");
+    })
+    .catch(async e => {
+      // SSO threw — still try the Teams-injected identity before giving up
+      try {
+        const ct = await teamsContextToken();
+        if (ct) {
+          ID_TOKEN = ct;
+          return refreshAll().catch(re => {
+            if (re.code === 403 && re.detail && re.detail.email) { showAuthScreen("unlinked", re.detail.email); return; }
+            AUTH_ERR = (re.message || String(re)) + " (after sign-in)"; showAuthScreen("login");
+          });
+        }
+      } catch (e2) { }
+      AUTH_ERR = "Teams sign-in: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
+      console.warn("Teams sign-in failed:", e);
+      showAuthScreen("login");
+    })
+    .finally(() => { if (btn) btn.disabled = false; });
+    return;
+  }
   const m = getMsal();
   if (!m) return toast("Login library not loaded (CDN blocked?)", "err");
-  m.loginRedirect({ scopes: AUTH.scopes });
+  // Clear stale interaction state from a previous round trip that never completed
+  // (e.g. an exchange that failed). MSAL v5 silently refuses a new loginRedirect
+  // while `msal.interaction.status` lingers — that reads as "click does nothing".
+  try {
+    sessionStorage.removeItem("msal.interaction.status");
+    for (const k of Object.keys(sessionStorage)) {
+      if (k.startsWith("msal.") && (k.includes(".code.verifier") || k.includes(".request.origin") || k.includes(".request.params") || k.includes(".interaction.status"))) sessionStorage.removeItem(k);
+    }
+  } catch (e) { /* storage unavailable — proceed anyway */ }
+  try {
+    m.loginRedirect({ scopes: AUTH.scopes }).catch(e => {
+      AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
+      showAuthScreen("login");
+    });
+  } catch (e) {
+    AUTH_ERR = e.message || String(e);
+    showAuthScreen("login");
+  }
+}
+function looksLikeTeamsUA() {
+  try { return /teams/i.test(navigator.userAgent || ""); } catch (e) { return false; }
+}
+async function teamsContextProbe() {
+  // Works in BOTH desktop (iframe) and mobile (top-level webview) Teams.
+  // Guard: UA must say Teams AND the SDK context must actually resolve —
+  // in a plain browser getContext() never resolves, so the 5s timeout bails out.
+  if (!looksLikeTeamsUA()) return null;
+  try {
+    if (!(window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext)) return null;
+    const r = await Promise.race([
+      (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
+      new Promise(res => setTimeout(() => res(null), 5000)),
+    ]);
+    return (r && (r.ssoInTeams || r.team || r.chat || r.user)) ? r : null;
+  } catch (e) { return null; }
+}
+async function teamsSsoToken() {
+  // Teams tab: broker the token via Teams SSO (no browser redirect possible in-iframe)
+  const r = await microsoftTeams.authentication.getAuthToken({
+    scopes: ["openid", "profile", "email"],
+    expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
+  });
+  return (r && r.token) || null;
+}
+async function teamsContextToken() {
+  // Fallback when SSO is unavailable: the Teams webview itself injects the signed-in
+  // user's identity into the app context (userPrincipalName / UPN). No token
+  // exchange, no portal config — but it's an unsigned JWT (Worker v1 is decode-only;
+  // the security upgrade to signature verification is the documented 8b step).
+  const ctx = await microsoftTeams.app.getContext();
+  const u = (ctx && ctx.user) || {};
+  const upn = u.userPrincipalName
+    || (u.id && String(u.id).indexOf("@") >= 0 ? String(u.id) : null)
+    || u.email || null;
+  if (!upn) return null;
+  const b64u = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return b64u({ alg: "none", typ: "JWT" }) + "." +
+    b64u({ email: upn, preferred_username: upn, name: u.displayName || "", auth: "teams-context" }) + ".";
 }
 async function ensureAuth() {
   if (!API_BASE) return null; // dev: API dev identity, no login needed
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
-  // 1) cached PKCE account (fast path; also completes a login-redirect round trip)
-  try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
-  // 2) Teams SSO (seamless inside a Teams tab; needs manifest webApplicationInfo).
-  //    NOTE: teams.js loads in ANY browser, but microsoftTeams.initialize() never
-  //    resolves outside the real Teams webview — it must be guarded (iframe check +
-  //    timeout) or boot hangs silently with no token and no auth screen.
-  try {
-    if (window.parent !== window && window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext) {
-      const ctx = await Promise.race([
-        (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
-        new Promise(res => setTimeout(() => res(null), 5000)),
-      ]);
-      if (ctx && ctx.ssoInTeams) {
-        const r = await microsoftTeams.authentication.getAuthToken({
-          expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
-        });
-        if (r && r.token) { ID_TOKEN = r.token; return r.token; }
-      }
+  const inTeams = await teamsContextProbe();
+  if (inTeams) {
+    // Inside a real Teams webview (desktop iframe or mobile top-level): SSO first,
+    // then the Teams-injected identity. No browser redirect possible here.
+    try {
+      const tok = await teamsSsoToken();
+      if (tok) { ID_TOKEN = tok; return tok; }
+      AUTH_ERR = "Teams SSO returned no token";
+    } catch (e) {
+      AUTH_ERR = "Teams SSO: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
+      console.warn("Teams SSO failed:", e);
     }
-  } catch (e) { console.warn("SSO unavailable:", e); }
+    // Fallback: identity injected by the Teams webview itself (no token exchange)
+    try {
+      const ctok = await teamsContextToken();
+      if (ctok) { ID_TOKEN = ctok; AUTH_ERR = ""; console.warn("using Teams context identity (SSO unavailable)"); return ctok; }
+    } catch (e) { console.warn("Teams context identity failed:", e); }
+    return ID_TOKEN; // null -> auth screen shows AUTH_ERR
+  }
+  // Plain browser: PKCE relay round trip (code + verifier exchanged via our Worker)
+  try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
   return ID_TOKEN;
 }
 function showAuthScreen(mode, email) {
@@ -151,6 +279,8 @@ function showAuthScreen(mode, email) {
   if (email) $("#unlinked-email").textContent = email;
   document.querySelector("main").style.display = "none";
   const b = document.querySelector("header nav"); if (b) b.style.display = "none";
+  const ae = $("#auth-err");
+  if (ae) { ae.textContent = AUTH_ERR ? "Sign-in error — " + AUTH_ERR : ""; ae.style.display = AUTH_ERR ? "" : "none"; }
 }
 
 // ---------- state ----------

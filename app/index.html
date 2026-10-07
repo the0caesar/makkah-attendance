@@ -105,6 +105,7 @@
     <h2>Sign in</h2>
     <p class="hint">Use your company work account. Your email is matched to the team roster automatically.</p>
     <button id="btn-auth-login" class="btn primary big" style="width:100%">Sign in with work account</button>
+    <p id="auth-err" class="hint" style="margin-top:12px;display:none;color:#e5535b;white-space:pre-wrap"></p>
     <p class="hint" style="margin-top:14px">Inside Teams the app signs you in automatically — no button needed there.</p>
   </div>
   <div id="auth-mode-unlinked" style="display:none">
@@ -122,6 +123,6 @@
      builds: MSAL v5.25.0, teams-js v2.57.0 (UMD global: microsoftTeams). -->
 <script src="teams.js"></script>
 <script src="msal-browser.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=20261007d"></script>
 </body>
 </html>
