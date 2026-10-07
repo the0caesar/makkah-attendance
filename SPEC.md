@@ -248,6 +248,14 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-07 (SSO cutover — CDN + boot-hang fixes)
+- **"Login library not loaded (CDN blocked?)" root cause = MY BUG, not tenant:** index.html referenced `alcdn.msauth.net/browser/3.20.3` + `res.cdn.office.net/teams-js/2.26.2` — both **404 (phantom versions that don't exist** on any CDN). Fixed: self-hosted **MSAL v5.25.0** + **teams-js v2.57.0** (UMD globals `msal` / `microsoftTeams` verified) in the Pages repo — same-origin, filter-proof.
+- **MSAL v5 compat:** `handleRedirectPromise` → `initialize()` (shim supports both).
+- **Boot-hang bug found & fixed:** teams.js loads in ANY browser, but `microsoftTeams.initialize()` never resolves outside the real Teams webview → boot stalled silently (app visible, no token, no auth screen). Guard: `window.parent !== window` + 5s `Promise.race` timeout.
+- **Verified headless end-to-end to the personal wall:** live site → auth screen (login button) → click → AAD authorize, account pre-filled `70180@sec.se.com.sa` → **consent screen** ("Permissions requested — makkah-attendance") → identity-verify step (phone — only Essam). Full chain proven; last hop is standard PKCE exchange (token endpoint already proven valid by authorize probe + 5/5 worker identity tests).
+- **Pages gotcha:** browser edge-caches app.js — verify fixes with `curl | grep <marker>` AND cache-busted tabs (query string), or clean tests silently run old code.
+- NEXT: Essam Ctrl+Shift+R → Sign in → Accept consent → app live → sideload zip → reminders webhook.
+
 ### 2026-10-07 (SSO cutover)
 - **Entra registration created by Essam** (App registrations blade: create worked, view 401s — no roles on his account; "No roles assigned" on his profile card; Aug 26 vault note confirms he was never a global admin either — self-service create was possible in August, role/tenant-setting since changed; audit log = IT only).
 - **Client ID `0cf32ba0-241d-4518-aa93-039664318a28`** captured from a paused screen-recording of the Overview flash (vision-analyzed crop).
