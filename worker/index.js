@@ -580,11 +580,11 @@ function json(obj, code, extra) {
 async function identityFor(req, env) {
   if (env.DEV_EMPLOYEE_NUMBER) {
     const email = req.headers.get("x-dev-email") || env.DEV_DEV_EMAIL || null;
-    return identityByNumber(env, String(env.DEV_EMPLOYEE_NUMBER), email, true);
+    return { ident: await identityByNumber(env, String(env.DEV_EMPLOYEE_NUMBER), email, true), hadToken: false };
   }
   const email = jwtEmail(req);
-  if (!email) return null;
-  return identityByEmail(env, email);
+  if (!email) return { ident: null, hadToken: false };
+  return { ident: await identityByEmail(env, email), hadToken: true, email };
 }
 
 export default {
@@ -604,8 +604,13 @@ export default {
       if (t) { try { body = JSON.parse(t); } catch { body = {}; } }
     }
 
-    const m = await identityFor(req, env);
-    if (!m) return json({ error: "unauthorized: sign in with your work account" }, 401, cors);
+    const { ident: m, hadToken, email } = await identityFor(req, env);
+    if (!m) {
+      // signed in but email not on the roster -> 403 with the email (app shows link screen);
+      // no token at all -> 401 (app shows login screen)
+      if (hadToken) return json({ error: "email not linked to roster", email }, 403, cors);
+      return json({ error: "unauthorized: sign in with your work account" }, 401, cors);
+    }
 
     const res = await handleApi(env, req.method, url.pathname, q, body, m);
     // (payload, code) tuple convention: exactly 2 elements, element 1 a number.

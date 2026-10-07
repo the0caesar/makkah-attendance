@@ -22,6 +22,8 @@
     "outline": "outline.png"
   },
   "accentColor": "#0D1630",
+  "validDomains": ["the0caesar.github.io"],
+  "devicePermissions": ["geolocation"],
   "staticTabs": [
     {
       "contentUrl": "https://the0caesar.github.io/makkah-attendance/",
@@ -29,7 +31,6 @@
     }
   ],
   "webApplicationInfo": {
-    "url": "https://the0caesar.github.io/makkah-attendance/",
-    "desktopOnly": false
+    "url": "https://the0caesar.github.io/makkah-attendance/"
   }
 }

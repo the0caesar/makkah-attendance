@@ -3,7 +3,21 @@
 "use strict";
 
 // ---------- helpers ----------
-const API_BASE = ""; // prod: "https://<function>.azurewebsites.net" — dev/local: "" (proxy serves /api/*)
+// prod: set to the live Cloudflare Worker URL (see worker/README.md).
+// empty string = same-origin (local dev proxy or local `wrangler dev` with dev hatch).
+const API_BASE = "";
+const AUTH = {
+  // STEP 8: user-facing Entra app registration (NOT the Dataverse client-credentials one).
+  // Settings: Web redirect URI https://the0caesar.github.io/makkah-attendance/
+  //           + Mobile & desktop same URI + "Allow public client flows" = Yes
+  //           + delegated scopes openid/profile/email (user consent).
+  // Teams SSO: manifest webApplicationInfo.id must equal this client_id,
+  //           resource = "api://the0caesar.github.io/makkah-attendance".
+  client_id: "REPLACE_WITH_USER_APP_CLIENT_ID",
+  tenant: "22e3bb8f-9a96-48bd-99f8-f652d83d904c",
+  scopes: ["openid", "profile", "email"],
+  redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = u.search; return u.href; })(),
+};
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -17,10 +31,20 @@ function toast(msg, kind = "ok") {
   clearTimeout(t._h);
   t._h = setTimeout(() => (t.style.display = "none"), 4000);
 }
+let ID_TOKEN = null; // JWT (SSO id_token or PKCE id_token) sent to the API as Bearer
+function jwtEmail(token) {
+  try {
+    const p = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(p)).email || JSON.parse(atob(p)).preferred_username || null;
+  } catch (e) { return null; }
+}
 async function api(path, opts = {}) {
+  const h = {};
+  if (opts.body) h["Content-Type"] = "application/json";
+  if (ID_TOKEN) h["Authorization"] = "Bearer " + ID_TOKEN;
   const r = await fetch(API_BASE + path, {
     method: opts.method || "GET",
-    headers: opts.body ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(h).length ? h : undefined,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let j = {};
@@ -61,6 +85,67 @@ function getLocation() {
       e => rej(new Error({ 1: "Location permission denied", 2: "Position unavailable (GPS off?)", 3: "Timed out" }[e.code] || "Location error")),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
   });
+}
+
+// ---------- identity (Teams SSO → PKCE fallback; see SPEC.md §3) ----------
+function getMsal() {
+  if (window.__msal) return window.__msal;
+  if (!window.msal) return null;
+  window.__msal = new window.msal.PublicClientApplication({
+    auth: {
+      clientId: AUTH.client_id,
+      authority: "https://login.microsoftonline.com/" + AUTH.tenant,
+      redirectUri: AUTH.redirect_uri,
+    },
+    cache: { cacheLocation: "localStorage" },
+  });
+  return window.__msal;
+}
+async function pkceToken() {
+  const m = getMsal();
+  if (!m) return null;
+  await m.handleRedirectPromise();
+  const accounts = m.getAllAccounts();
+  if (!accounts.length) return null;
+  try {
+    const r = await m.acquireTokenSilent({ account: accounts[0], scopes: AUTH.scopes });
+    return r.idToken || null;
+  } catch (e) { console.warn("acquireTokenSilent:", e); return null; }
+}
+function pkceLogin() {
+  const m = getMsal();
+  if (!m) return toast("Login library not loaded (CDN blocked?)", "err");
+  m.loginRedirect({ scopes: AUTH.scopes });
+}
+async function ensureAuth() {
+  if (!API_BASE) return null; // dev: API dev identity, no login needed
+  if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
+  // 1) cached PKCE account (fast path; also completes a login-redirect round trip)
+  try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
+  // 2) Teams SSO (seamless inside a Teams tab; needs manifest webApplicationInfo)
+  try {
+    if (window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext) {
+      await microsoftTeams.initialize();
+      const ctx = await microsoftTeams.app.getContext();
+      if (ctx && ctx.ssoInTeams) {
+        const r = await microsoftTeams.authentication.getAuthToken({
+          expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
+        });
+        if (r && r.token) { ID_TOKEN = r.token; return r.token; }
+      }
+    }
+  } catch (e) { console.warn("SSO unavailable:", e); }
+  return ID_TOKEN;
+}
+function showAuthScreen(mode, email) {
+  const el = $("#auth-screen");
+  if (!el) return;
+  el.style.display = "block";
+  $("#auth-mode-login").style.display = mode === "login" ? "" : "none";
+  $("#auth-mode-unlinked").style.display = mode === "unlinked" ? "" : "none";
+  if (email) $("#unlinked-email").textContent = email;
+  document.querySelector("main").style.display = "none";
+  const b = document.querySelector("header nav"); if (b) b.style.display = "none";
 }
 
 // ---------- state ----------
@@ -480,10 +565,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) { toast(err.message, "err"); }
   });
   $$("#admin-tabs button").forEach(b => b.addEventListener("click", () => { S.adminTab = b.dataset.tab; renderAdmin(); }));
+  const al = $("#btn-auth-login"); if (al) al.addEventListener("click", () => pkceLogin());
+  const ac = $("#btn-auth-copy"); if (ac) ac.addEventListener("click", () => {
+    navigator.clipboard.writeText($("#unlinked-email").textContent).then(() => toast("Email copied — send it to your supervisor"));
+  });
   setInterval(() => { if (!document.hidden && (S.screen === "today" || S.screen === "approvals")) refresh().catch(() => { }); }, 60000);
+  // identity first (prod only), then data
+  if (API_BASE) {
+    const tok = await ensureAuth();
+    if (!tok) { showAuthScreen("login"); return; }
+  }
   try {
     await refreshAll();
   } catch (e) {
+    if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
+    if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
   }
 });
