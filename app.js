@@ -147,6 +147,30 @@ async function pkceToken() {
   } catch (e) { AUTH_ERR = e.message || String(e); return null; }
 }
 function pkceLogin() {
+  // Inside a Teams tab the browser redirect is blocked in-iframe (redirect_in_iframe)
+  // — use Teams SSO instead (the SSO dialog asks Microsoft once).
+  if (teamsSsoAvailable()) {
+    AUTH_ERR = "";
+    const btn = document.getElementById("btn-auth-login"); if (btn) btn.disabled = true;
+    Promise.race([
+      (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
+      new Promise(res => setTimeout(() => res(null), 5000)),
+    ]).then(() => teamsSsoToken()).then(t => {
+      if (t) {
+        ID_TOKEN = t;
+        return refreshAll().catch(e => {
+          if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
+          AUTH_ERR = (e.message || String(e)) + " (after SSO)"; showAuthScreen("login");
+        });
+      }
+      AUTH_ERR = "Teams SSO returned no token"; showAuthScreen("login");
+    }).catch(e => {
+      AUTH_ERR = "Teams SSO: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
+      console.warn("Teams SSO (button) failed:", e);
+      showAuthScreen("login");
+    }).finally(() => { if (btn) btn.disabled = false; });
+    return;
+  }
   const m = getMsal();
   if (!m) return toast("Login library not loaded (CDN blocked?)", "err");
   // Clear stale interaction state from a previous round trip that never completed
@@ -168,29 +192,40 @@ function pkceLogin() {
     showAuthScreen("login");
   }
 }
+function teamsSsoAvailable() {
+  try { return !!(window.parent && window.parent !== window && window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext); } catch (e) { return false; }
+}
+async function teamsSsoToken() {
+  // Teams tab: broker the token via Teams SSO (no browser redirect possible in-iframe)
+  const r = await microsoftTeams.authentication.getAuthToken({
+    scopes: ["openid", "profile", "email"],
+    expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
+  });
+  return (r && r.token) || null;
+}
 async function ensureAuth() {
   if (!API_BASE) return null; // dev: API dev identity, no login needed
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
-  // 1) cached PKCE account (fast path; also completes a login-redirect round trip)
-  try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
-  // 2) Teams SSO (seamless inside a Teams tab; needs manifest webApplicationInfo).
-  //    NOTE: teams.js loads in ANY browser, but microsoftTeams.initialize() never
-  //    resolves outside the real Teams webview — it must be guarded (iframe check +
-  //    timeout) or boot hangs silently with no token and no auth screen.
-  try {
-    if (window.parent !== window && window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext) {
-      const ctx = await Promise.race([
+  if (teamsSsoAvailable()) {
+    // Inside a real Teams tab: SSO is the only path (redirect login is blocked
+    // in-iframe: redirect_in_iframe). Don't gate on ctx.ssoInTeams — the flag is
+    // unreliable; just attempt and surface the real error on the auth screen.
+    try {
+      await Promise.race([
         (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
         new Promise(res => setTimeout(() => res(null), 5000)),
       ]);
-      if (ctx && ctx.ssoInTeams) {
-        const r = await microsoftTeams.authentication.getAuthToken({
-          expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
-        });
-        if (r && r.token) { ID_TOKEN = r.token; return r.token; }
-      }
+      const tok = await teamsSsoToken();
+      if (tok) { ID_TOKEN = tok; return tok; }
+      AUTH_ERR = "Teams SSO returned no token";
+    } catch (e) {
+      AUTH_ERR = "Teams SSO: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
+      console.warn("Teams SSO failed:", e);
     }
-  } catch (e) { console.warn("SSO unavailable:", e); }
+    return ID_TOKEN; // null -> auth screen shows AUTH_ERR
+  }
+  // Plain browser: PKCE relay round trip (code + verifier exchanged via our Worker)
+  try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
   return ID_TOKEN;
 }
 function showAuthScreen(mode, email) {
