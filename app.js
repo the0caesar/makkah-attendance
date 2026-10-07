@@ -104,25 +104,47 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  // MSAL v5 split the old handleRedirectPromise() into TWO steps:
-  //   1. await initialize()          — storage bootstrap ONLY (does NOT touch the hash)
-  //   2. await handleRedirectPromise() — processes the ?code= / #code= return trip
-  // Both exist in the pinned v5.25.0 build; calling only initialize() silently
-  // ignores the returned code (observed: code in hash, no account, no error).
-  try { await m.initialize(); } catch (e) { /* non-fatal; continue to redirect handling */ }
+  // MSAL v5: initialize() bootstraps storage only (does NOT process the hash).
+  try { await m.initialize(); } catch (e) { /* non-fatal */ }
+  // AAD returns with #code=...&state=... in the hash. We do NOT use MSAL's
+  // browser-side handleRedirectPromise: AAD refuses browser redemption of PKCE
+  // codes for Web-registered apps (AADSTS9002326, SPA-only). Instead we relay
+  // the one-time code + PKCE verifier to our Worker, which redeems it
+  // server-side (the classic allowed path) and returns the AAD id_token.
+  const hash = location.hash;
+  const codeM = hash.match(/code=([^&]+)/);
+  const stateM = hash.match(/state=([^&]+)/);
+  if (!codeM) return null; // fresh load — nothing to exchange
+  const b64u = (s) => { let x = String(s).replace(/-/g, "+").replace(/_/g, "/"); while (x.length % 4) x += "="; return atob(x); };
+  let verifier = null, expectedState = null;
   try {
-    await m.handleRedirectPromise();
-  } catch (e) {
-    AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
-    console.warn("handleRedirectPromise:", e);
-    return null;
+    const vRaw = sessionStorage.getItem("msal." + AUTH.client_id + ".code.verifier");
+    if (vRaw) verifier = b64u(vRaw);
+    const pRaw = sessionStorage.getItem("msal." + AUTH.client_id + ".request.params");
+    if (pRaw) { const p = JSON.parse(b64u(pRaw)); if (p.state) expectedState = JSON.parse(b64u(p.state)).id || null; }
+  } catch (e) { console.warn("read msal temp state:", e); }
+  // CSRF guard: returned state must equal the state MSAL sent (when both parse)
+  if (stateM && expectedState) {
+    let actual = null;
+    try { actual = JSON.parse(b64u(decodeURIComponent(stateM[1]))).id; } catch (e) { }
+    if (actual && actual !== expectedState) { AUTH_ERR = "state mismatch (csrf)"; return null; }
   }
-  const accounts = m.getAllAccounts();
-  if (!accounts.length) return null;
+  if (!verifier) { AUTH_ERR = "pkce verifier missing"; return null; }
   try {
-    const r = await m.acquireTokenSilent({ account: accounts[0], scopes: AUTH.scopes });
-    return r.idToken || null;
-  } catch (e) { AUTH_ERR = (e && e.errorCode) || e.message || String(e); console.warn("acquireTokenSilent:", e); return null; }
+    const res = await fetch(API_BASE + "/api/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: decodeURIComponent(codeM[1]), verifier, redirect_uri: AUTH.redirect_uri }),
+    });
+    const j = await res.json();
+    if (j.id_token) {
+      // consume the code+state so a refresh can't re-attempt the (single-use) code
+      history.replaceState(null, "", location.pathname + location.search);
+      return j.id_token;
+    }
+    AUTH_ERR = (j.error || "token exchange failed") + (j.description ? ": " + j.description : "");
+    return null;
+  } catch (e) { AUTH_ERR = e.message || String(e); return null; }
 }
 function pkceLogin() {
   const m = getMsal();
