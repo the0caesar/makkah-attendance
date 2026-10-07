@@ -584,7 +584,51 @@ async function identityFor(req, env) {
   }
   const email = jwtEmail(req);
   if (!email) return { ident: null, hadToken: false };
+  // Primary: the sign-in UPN embeds the employee number (70180@SEC.se.com.sa -> 70180).
+  // Every team member's sign-in ID starts with their number, so number-match is the
+  // canonical resolution; exact email match is kept as a silent last resort.
+  const local = String(email).split("@")[0].trim();
+  if (/^\d+$/.test(local)) {
+    const byNum = await identityByNumber(env, local, email, false);
+    if (byNum.name) return { ident: byNum, hadToken: true, email };
+  }
   return { ident: await identityByEmail(env, email), hadToken: true, email };
+}
+
+// ---------- PKCE token relay (server-side code redemption) ----------
+// Browsers are now refused by AAD for redeeming PKCE codes against Web-registered
+// apps (AADSTS9002326 "cross-origin token redemption ... SPA client-type"). A
+// server-side redemption (no Origin header) is the classic allowed path, so we
+// relay the one-time code + PKCE verifier here and return the AAD-issued id_token.
+// Security: open endpoint by design — a caller needs a FRESH single-use AAD code
+// (10 min TTL) AND its matching PKCE verifier, which only the browser that
+// completed a real Microsoft sign-in holds. The id_token is AAD-issued for the
+// user who authenticated (v1: decode-only identity, same as the rest of the API).
+async function oauthToken(req, env, cors) {
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
+  let body; try { body = JSON.parse(await req.text()); } catch { return json({ error: "bad json" }, 400, cors); }
+  const code = body.code, verifier = body.verifier;
+  if (!code || !verifier) return json({ error: "code and verifier required" }, 400, cors);
+  const clientId = env.AUTH_CLIENT_ID;
+  if (!clientId) return json({ error: "AUTH_CLIENT_ID not configured" }, 500, cors);
+  const redirectUri = body.redirect_uri || env.AUTH_REDIRECT_URI || "https://the0caesar.github.io/makkah-attendance/";
+  const d = new URLSearchParams({
+    client_id: clientId,
+    grant_type: "authorization_code",
+    code: code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+  });
+  try {
+    const r = await fetch(`https://login.microsoftonline.com/${env.DV_TENANT_ID}/oauth2/v2.0/token`, {
+      method: "POST", body: d, headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    const j = await r.json();
+    if (j.id_token) return json({ id_token: j.id_token, token_type: j.token_type, expires_in: j.expires_in }, 200, cors);
+    return json({ error: j.error || "token exchange failed", description: j.error_description || "" }, 400, cors);
+  } catch (e) {
+    return json({ error: "token exchange error: " + (e && e.message || String(e)) }, 500, cors);
+  }
 }
 
 // ---------- reminders (cron -> channel webhook @mention; SPEC §5.7 v1) ----------
@@ -708,6 +752,8 @@ export default {
       const now = url.searchParams.get("now") ? new Date(url.searchParams.get("now")) : new Date();
       return json({ now: now.toISOString(), due: reminderPlan(now, settings, roster, signinsToday, absentEmps) }, 200, cors);
     }
+    // PKCE relay: runs BEFORE identity resolution (it IS the sign-in step).
+    if (url.pathname === "/api/oauth/token") return oauthToken(req, env, cors);
     if (!url.pathname.startsWith("/api/")) return json({ error: "not found: " + url.pathname }, 404, cors);
 
     const q = {};
