@@ -31,6 +31,8 @@
     }
   ],
   "webApplicationInfo": {
+    "id": "0cf32ba0-241d-4518-aa93-039664318a28",
+    "resource": "api://22e3bb8f-9a96-48bd-99f8-f652d83d904c/0cf32ba0-241d-4518-aa93-039664318a28",
     "url": "https://the0caesar.github.io/makkah-attendance/"
   }
 }

@@ -3,17 +3,16 @@
 "use strict";
 
 // ---------- helpers ----------
-// prod: set to the live Cloudflare Worker URL (see worker/README.md).
+// prod: live Cloudflare Worker (LIVE 2026-10-07, verified from CF edge).
 // empty string = same-origin (local dev proxy or local `wrangler dev` with dev hatch).
-const API_BASE = "";
+const API_BASE = "https://makkah-attendance-api.makkah-attendance-api.workers.dev";
 const AUTH = {
-  // STEP 8: user-facing Entra app registration (NOT the Dataverse client-credentials one).
-  // Settings: Web redirect URI https://the0caesar.github.io/makkah-attendance/
-  //           + Mobile & desktop same URI + "Allow public client flows" = Yes
-  //           + delegated scopes openid/profile/email (user consent).
-  // Teams SSO: manifest webApplicationInfo.id must equal this client_id,
-  //           resource = "api://the0caesar.github.io/makkah-attendance".
-  client_id: "REPLACE_WITH_USER_APP_CLIENT_ID",
+  // User-facing Entra app registration "makkah-attendance" (public client, PKCE).
+  // Web redirect https://the0caesar.github.io/makkah-attendance/ registered 2026-10-07;
+  // PKCE authorize probe: AAD returns the sign-in page (client + redirect + public flows OK).
+  // Teams SSO: manifest webApplicationInfo.id = this client_id,
+  //           resource = "api://<tenant>/<client>".
+  client_id: "0cf32ba0-241d-4518-aa93-039664318a28",
   tenant: "22e3bb8f-9a96-48bd-99f8-f652d83d904c",
   scopes: ["openid", "profile", "email"],
   redirect_uri: (() => { const u = new URL(location.href); u.hash = ""; u.search = u.search; return u.href; })(),
