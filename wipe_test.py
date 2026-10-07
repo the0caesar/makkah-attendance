@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from api_core import call
 
 # 1) E2E site — NOTE: plural is `new_sites`, NOT `new_siteses` (SPEC §8.4)
-st, r = call("GET", "new_sites?$select=new_siteid,new_site_name&$filter=new_site_name eq 'E2E Test Site'")
+st, r = call("GET", "new_sites?$select=new_siteid,new_site_name&$filter=new_site_name eq 'E2E Test Site' or new_site_name eq 'E2E Live Site'")
 n = 0
 for row in (r.get("value") or []) if st == 200 and isinstance(r, dict) else []:
     if call("DELETE", "new_sites(%s)" % row["new_siteid"])[0] == 200:
