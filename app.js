@@ -103,7 +103,8 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  await m.handleRedirectPromise();
+  // MSAL v5 renamed handleRedirectPromise -> initialize; support both
+  if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
   const accounts = m.getAllAccounts();
   if (!accounts.length) return null;
   try {
