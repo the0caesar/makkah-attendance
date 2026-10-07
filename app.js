@@ -155,20 +155,35 @@ function pkceLogin() {
     Promise.race([
       (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
       new Promise(res => setTimeout(() => res(null), 5000)),
-    ]).then(() => teamsSsoToken()).then(t => {
+    ]).then(() => teamsSsoToken())
+    .then(t => t || teamsContextToken()) // SSO token, else Teams-injected identity
+    .then(t => {
       if (t) {
         ID_TOKEN = t;
         return refreshAll().catch(e => {
           if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
-          AUTH_ERR = (e.message || String(e)) + " (after SSO)"; showAuthScreen("login");
+          AUTH_ERR = (e.message || String(e)) + " (after sign-in)"; showAuthScreen("login");
         });
       }
-      AUTH_ERR = "Teams SSO returned no token"; showAuthScreen("login");
-    }).catch(e => {
-      AUTH_ERR = "Teams SSO: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
-      console.warn("Teams SSO (button) failed:", e);
+      AUTH_ERR = "No Teams identity available (SSO and context both failed)"; showAuthScreen("login");
+    })
+    .catch(async e => {
+      // SSO threw — still try the Teams-injected identity before giving up
+      try {
+        const ct = await teamsContextToken();
+        if (ct) {
+          ID_TOKEN = ct;
+          return refreshAll().catch(re => {
+            if (re.code === 403 && re.detail && re.detail.email) { showAuthScreen("unlinked", re.detail.email); return; }
+            AUTH_ERR = (re.message || String(re)) + " (after sign-in)"; showAuthScreen("login");
+          });
+        }
+      } catch (e2) { }
+      AUTH_ERR = "Teams sign-in: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
+      console.warn("Teams sign-in failed:", e);
       showAuthScreen("login");
-    }).finally(() => { if (btn) btn.disabled = false; });
+    })
+    .finally(() => { if (btn) btn.disabled = false; });
     return;
   }
   const m = getMsal();
@@ -203,6 +218,21 @@ async function teamsSsoToken() {
   });
   return (r && r.token) || null;
 }
+async function teamsContextToken() {
+  // Fallback when SSO is unavailable: the Teams webview itself injects the signed-in
+  // user's identity into the app context (userPrincipalName / UPN). No token
+  // exchange, no portal config — but it's an unsigned JWT (Worker v1 is decode-only;
+  // the security upgrade to signature verification is the documented 8b step).
+  const ctx = await microsoftTeams.app.getContext();
+  const u = (ctx && ctx.user) || {};
+  const upn = u.userPrincipalName
+    || (u.id && String(u.id).indexOf("@") >= 0 ? String(u.id) : null)
+    || u.email || null;
+  if (!upn) return null;
+  const b64u = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return b64u({ alg: "none", typ: "JWT" }) + "." +
+    b64u({ email: upn, preferred_username: upn, name: u.displayName || "", auth: "teams-context" }) + ".";
+}
 async function ensureAuth() {
   if (!API_BASE) return null; // dev: API dev identity, no login needed
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
@@ -222,6 +252,11 @@ async function ensureAuth() {
       AUTH_ERR = "Teams SSO: " + (e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e);
       console.warn("Teams SSO failed:", e);
     }
+    // Fallback: identity injected by the Teams webview itself (no token exchange)
+    try {
+      const ctok = await teamsContextToken();
+      if (ctok) { ID_TOKEN = ctok; AUTH_ERR = ""; console.warn("using Teams context identity (SSO unavailable)"); return ctok; }
+    } catch (e) { console.warn("Teams context identity failed:", e); }
     return ID_TOKEN; // null -> auth screen shows AUTH_ERR
   }
   // Plain browser: PKCE relay round trip (code + verifier exchanged via our Worker)
