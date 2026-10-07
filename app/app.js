@@ -103,7 +103,8 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  await m.handleRedirectPromise();
+  // MSAL v5 renamed handleRedirectPromise -> initialize; support both
+  if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
   const accounts = m.getAllAccounts();
   if (!accounts.length) return null;
   try {
@@ -121,11 +122,16 @@ async function ensureAuth() {
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
   // 1) cached PKCE account (fast path; also completes a login-redirect round trip)
   try { const t = await pkceToken(); if (t) { ID_TOKEN = t; return t; } } catch (e) { console.warn("pkce:", e); }
-  // 2) Teams SSO (seamless inside a Teams tab; needs manifest webApplicationInfo)
+  // 2) Teams SSO (seamless inside a Teams tab; needs manifest webApplicationInfo).
+  //    NOTE: teams.js loads in ANY browser, but microsoftTeams.initialize() never
+  //    resolves outside the real Teams webview — it must be guarded (iframe check +
+  //    timeout) or boot hangs silently with no token and no auth screen.
   try {
-    if (window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext) {
-      await microsoftTeams.initialize();
-      const ctx = await microsoftTeams.app.getContext();
+    if (window.parent !== window && window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext) {
+      const ctx = await Promise.race([
+        (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
+        new Promise(res => setTimeout(() => res(null), 5000)),
+      ]);
       if (ctx && ctx.ssoInTeams) {
         const r = await microsoftTeams.authentication.getAuthToken({
           expirationInMilliseconds: 5 * 60 * 1000, idToken: true,
