@@ -146,16 +146,13 @@ async function pkceToken() {
     return null;
   } catch (e) { AUTH_ERR = e.message || String(e); return null; }
 }
-function pkceLogin() {
-  // Inside a Teams tab the browser redirect is blocked in-iframe (redirect_in_iframe)
-  // — use Teams SSO instead (the SSO dialog asks Microsoft once).
-  if (teamsSsoAvailable()) {
+async function pkceLogin() {
+  const inTeams = await teamsContextProbe();
+  if (inTeams) {
+    // Inside Teams (desktop or mobile): SSO dialog, else Teams-injected identity.
     AUTH_ERR = "";
     const btn = document.getElementById("btn-auth-login"); if (btn) btn.disabled = true;
-    Promise.race([
-      (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
-      new Promise(res => setTimeout(() => res(null), 5000)),
-    ]).then(() => teamsSsoToken())
+    teamsSsoToken()
     .then(t => t || teamsContextToken()) // SSO token, else Teams-injected identity
     .then(t => {
       if (t) {
@@ -207,8 +204,22 @@ function pkceLogin() {
     showAuthScreen("login");
   }
 }
-function teamsSsoAvailable() {
-  try { return !!(window.parent && window.parent !== window && window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext); } catch (e) { return false; }
+function looksLikeTeamsUA() {
+  try { return /teams/i.test(navigator.userAgent || ""); } catch (e) { return false; }
+}
+async function teamsContextProbe() {
+  // Works in BOTH desktop (iframe) and mobile (top-level webview) Teams.
+  // Guard: UA must say Teams AND the SDK context must actually resolve —
+  // in a plain browser getContext() never resolves, so the 5s timeout bails out.
+  if (!looksLikeTeamsUA()) return null;
+  try {
+    if (!(window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext)) return null;
+    const r = await Promise.race([
+      (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
+      new Promise(res => setTimeout(() => res(null), 5000)),
+    ]);
+    return (r && (r.ssoInTeams || r.team || r.chat || r.user)) ? r : null;
+  } catch (e) { return null; }
 }
 async function teamsSsoToken() {
   // Teams tab: broker the token via Teams SSO (no browser redirect possible in-iframe)
@@ -236,15 +247,11 @@ async function teamsContextToken() {
 async function ensureAuth() {
   if (!API_BASE) return null; // dev: API dev identity, no login needed
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
-  if (teamsSsoAvailable()) {
-    // Inside a real Teams tab: SSO is the only path (redirect login is blocked
-    // in-iframe: redirect_in_iframe). Don't gate on ctx.ssoInTeams — the flag is
-    // unreliable; just attempt and surface the real error on the auth screen.
+  const inTeams = await teamsContextProbe();
+  if (inTeams) {
+    // Inside a real Teams webview (desktop iframe or mobile top-level): SSO first,
+    // then the Teams-injected identity. No browser redirect possible here.
     try {
-      await Promise.race([
-        (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
-        new Promise(res => setTimeout(() => res(null), 5000)),
-      ]);
       const tok = await teamsSsoToken();
       if (tok) { ID_TOKEN = tok; return tok; }
       AUTH_ERR = "Teams SSO returned no token";
