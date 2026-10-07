@@ -1,8 +1,9 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
-  "manifestVersion": 1.16,
+  "manifestVersion": "1.16",
+  "id": "a6de80f6-8375-4ed1-9999-199d74a0a94a",
   "packageName": "com.ngrid.makkah.attendance",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "developer": {
     "name": "NGRID Protection Makkah",
     "websiteUrl": "https://www.ngrid.sa",
@@ -14,7 +15,7 @@
     "full": "Team Attendance & Requests"
   },
   "description": {
-    "short": "GPS sign-in/out, leave, on-call and shift approvals for the Makkah protection team.",
+    "short": "GPS sign-in/out, leave, on-call and shift approvals for the protection team.",
     "full": "Sign in and out with location enforcement, manage vacation, reset, training, on-call, overtime and call-out requests with supervisor approvals, and see the team grid. All data lives in the company Dataverse."
   },
   "icons": {
@@ -22,17 +23,25 @@
     "outline": "outline.png"
   },
   "accentColor": "#0D1630",
-  "validDomains": ["the0caesar.github.io"],
-  "devicePermissions": ["geolocation"],
+  "validDomains": [
+    "the0caesar.github.io"
+  ],
+  "devicePermissions": [
+    "geolocation"
+  ],
   "staticTabs": [
     {
-      "contentUrl": "https://the0caesar.github.io/makkah-attendance/",
-      "scopes": ["team", "personal"]
+      "entityId": "makkah-attendance",
+      "contentUrl": "https://the0caesar.github.io/makkah-attendance/?v=20261007c",
+      "scopes": [
+        "team",
+        "personal"
+      ],
+      "name": "Team Attendance"
     }
   ],
   "webApplicationInfo": {
     "id": "0cf32ba0-241d-4518-aa93-039664318a28",
-    "resource": "api://22e3bb8f-9a96-48bd-99f8-f652d83d904c/0cf32ba0-241d-4518-aa93-039664318a28",
-    "url": "https://the0caesar.github.io/makkah-attendance/"
+    "resource": "api://the0caesar.github.io/0cf32ba0-241d-4518-aa93-039664318a28"
   }
 }
