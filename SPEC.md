@@ -209,7 +209,7 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 | 4 | Local proxy (browser → Dataverse) | ✅ DONE | `proxy/proxy.py` — static + API forward + Haversine geofence; dev identity in `proxy/dev_identity.json` |
 | 5 | Run locally + verify with real data | ✅ DONE | `e2e_test.sh` **19/19 PASS** 2026-10-07 (geofence block/allow, request lifecycle, on-call swap→schedule, approvals, cancels); test rows wiped |
 | 6 | Teams packaging (manifest + icons + zip) | ✅ DONE (v1) | `teams/manifest.json` (v1.16), generated icons (clock motif), `makkah-attendance-teams-app.zip` (3 files, verified), `DEPLOY.md` — **URL now real (Pages live)**. **Manifest v2 PENDING:** `webApplicationInfo{id,resource}` (needs new Entra client ID), `devicePermissions:["geolocation"]`, `validDomains` |
-| 7 | **API port to JS + Cloudflare Worker** | ⬜ IN PROGRESS | `worker/` = JS port of `api_core.py` (~442 lines → JS); `wrangler.jsonc`; local test via `npx wrangler dev` (no account); then deploy (needs free CF account — Essam's email, no card) + E2E 19/19 against live Worker |
+| 7 | **API port to JS + Cloudflare Worker** | 🟡 LOCAL VERIFIED | `worker/index.js` = faithful JS port of `api_core.py`; `wrangler.jsonc` + `.dev.vars` (gitignored) + `README.md`. **`e2e_worker.sh` 20/20 PASS** 2026-10-07 against local `wrangler dev` (Miniflare, no account): geofence block/allow, request lifecycle, on-call swap→schedule, admin ops, settings, roster, live-Pages static. Test rows wiped. Parity fixes found by E2E: (a) Dataverse PATCH/POST return 204 → Python `call_h` hardcoded 200 on any 2xx; Worker now maps `resp.ok → 200` (else handlers see "write failed: 204"); (b) `(payload, code)` tuple vs legit array payloads → dispatch checks `length===2 && typeof res[1]==='number'`. **REMAINING:** deploy to live Worker (needs free CF account) + E2E against live URL + `API_BASE` in app.js |
 | 8 | Identity: Entra reg + SSO/PKCE in app.js | ⬜ NEXT | new app registration (Essam, 5 min, settings prepared); MSAL.js SSO + PKCE fallback + link screen; manifest v2 rebuild + zip |
 | 9 | Reminders: Power Automate scheduled flow | ⬜ NEXT | verified pattern (§3); try env-API flow creation headless first (PP JWT); fallback: UI recipe or driven UI |
 | 10 | Tenant tests + distribution | ⬜ LAST | sideload zip (Essam 1 min), SSO user-consent check, colleague end-to-end run |
@@ -239,8 +239,18 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 15. **URL-encode the filter path EXACTLY ONCE** — raw filter string into `urllib.parse.quote(path, safe="/?&=$(),'")`; inline pre-quoting = double-encode = 400.
 16. **Decimal columns silently drop writes to NULL** (site lat/lon/radius, signin lat/lon/accuracy): number → 204 but NULL; string → 400. Use the `*_str` string columns added 2026-10-07; parse floats in proxy/app.
 17. **POST returns no body / no row** — `Prefer: return-content=full` is ignored. Get the new id from the **Location header**: `.../new_requestses(guid)`; strip the `entityset(` prefix.
+18. **PATCH also returns 204, no body** — success. Python `call_h` hardcodes `200` for any 2xx (urllib), so `st == 200` checks pass; the JS Worker port must map `resp.ok → 200` explicitly or every PATCH looks like a write failure.
+19. **On-call swap pre-delete filter is double-encoded (silent no-op)** — `api_core.py:344` pre-quotes the filter with `safe="'"` and the outer `quote()` re-encodes `%` → the lookup GET fails silently; the existing otheremp row is NOT deleted, only the new row is written. Low impact (rotation overwrite handles most cases) — TODO: build that filter without pre-quoting (outer quote already covers it).
+20. **Identity in the Worker is decode-only (v1)** — Bearer JWT payload is base64-decoded for `email`/`preferred_username` without signature verification. Hardening (step 8b): RS256 verify via tenant JWKS + `iss`/`aud`/`exp` checks.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-07 (Worker port day)
+- **Local git repo initialized** in project dir (identity the0caesar@users.noreply.github.com to match GitHub); `deploy/web/` excluded (own repo).
+- **Cloudflare Worker built:** `worker/index.js` (JS port of api_core.py, ~440 lines), `wrangler.jsonc`, `.dev.vars` (gitignored; built from dataverse.json — secret never in chat), `worker/README.md` (deploy steps), `e2e_worker.sh`, `wipe_test.py`.
+- **`e2e_worker.sh` 20/20 PASS** against local `wrangler dev` (Miniflare, no CF account): full lifecycle incl. geofence, on-call swap→schedule, admin ops, live-Pages static. Test rows wiped.
+- **Parity bugs found+fixed by E2E:** 204-on-PATCH (Python hardcoded 200; Worker now `resp.ok→200`) — gotcha §8.18; array-payload vs (payload,code)-tuple dispatch collision (roster RangeError) — fixed; wipe script used `new_siteses` (404) — `new_sites` per §8.4; documented swap pre-delete double-encode no-op as §8.19.
+- NEXT: step 8 identity (Entra reg + MSAL SSO/PKCE + link screen in app.js), manifest v2 + zip, reminders flow (try PP env-API headless), CF account (Essam decision), live deploy + E2E.
 
 ### 2026-10-07 (research + Power Apps verdict)
 - **Power Apps probe (colleague test) PASSED:** second user opened + clicked the 1-button canvas app in Teams, got own email — connector-less canvas apps are free for M365 users (verified in Microsoft licensing docs).

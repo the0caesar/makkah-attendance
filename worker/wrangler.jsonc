@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "makkah-attendance-api",
+  "main": "index.js",
+  "compatibility_date": "2025-09-01",
+  "vars": {
+    "DV_ORG_URL": "https://org951b4d88.crm4.dynamics.com",
+    "DV_TENANT_ID": "22e3bb8f-9a96-48bd-99f8-f652d83d904c",
+    "DV_CLIENT_ID": "801c41a8-4d2d-48a6-a86e-f1bdc3c323e2",
+    "ALLOWED_ORIGIN": "https://the0caesar.github.io"
+  }
+}
