@@ -18,6 +18,7 @@
   <nav id="nav">
     <button data-screen="today" class="active">Today</button>
     <button data-screen="requests">Requests</button>
+    <button data-screen="shifts">Shifts</button>
     <button data-screen="approvals" id="nav-approvals" style="display:none">Approvals</button>
     <button data-screen="admin" id="nav-admin" style="display:none">Admin</button>
   </nav>
@@ -73,6 +74,12 @@
     <div id="my-requests"></div>
   </section>
 
+  <!-- SHIFTS -->
+  <section id="screen-shifts" class="screen" style="display:none">
+    <h2>Shifts</h2>
+    <div id="shifts-body"></div>
+  </section>
+
   <!-- APPROVALS -->
   <section id="screen-approvals" class="screen" style="display:none">
     <h2>Pending Approvals</h2>
@@ -87,11 +94,13 @@
     <div class="tabs" id="admin-tabs">
       <button data-tab="sites" class="active">Sites</button>
       <button data-tab="oncall">On-Call</button>
+      <button data-tab="logs">Logs</button>
       <button data-tab="people">People</button>
       <button data-tab="settings">Settings</button>
     </div>
     <div id="tab-sites" class="admin-tab"></div>
     <div id="tab-oncall" class="admin-tab" style="display:none"></div>
+    <div id="tab-logs" class="admin-tab" style="display:none"></div>
     <div id="tab-people" class="admin-tab" style="display:none"></div>
     <div id="tab-settings" class="admin-tab" style="display:none"></div>
   </section>
@@ -123,6 +132,6 @@
      builds: MSAL v5.25.0, teams-js v2.57.0 (UMD global: microsoftTeams). -->
 <script src="teams.js"></script>
 <script src="msal-browser.min.js"></script>
-<script src="app.js?v=20261007d"></script>
+<script src="app.js?v=20261007e"></script>
 </body>
 </html>

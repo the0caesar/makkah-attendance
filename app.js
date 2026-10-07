@@ -287,6 +287,7 @@ function showAuthScreen(mode, email) {
 const S = {
   me: null, roster: [], settings: {}, sites: [],
   weekStart: startOfWeek(new Date()),
+  shiftWeekStart: startOfWeek(new Date()),
   oncall: [], requests: [], signins: [], training: [],
   screen: "today", adminTab: "sites",
 };
@@ -324,7 +325,7 @@ async function loadBase() {
     api("/api/whoami"), api("/api/roster"), api("/api/settings"), api("/api/sites"),
   ]);
   Object.assign(S, { me, roster, settings, sites });
-  $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • approver" : ""}`;
+  $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • admin" : ""}`;
   $("#nav-approvals").style.display = me.is_approver ? "" : "none";
   $("#nav-admin").style.display = me.is_approver ? "" : "none";
   const b = $("#banner");
@@ -338,7 +339,7 @@ async function refresh() {
   const [oc, reqs, sig, tr] = await Promise.all([
     api(`/api/oncall?from=${from}&to=${to}`),
     api(`/api/requests?from=${from}&to=${to}`),
-    api(`/api/signins?days=2`),
+    api(`/api/signins?days=30`),
     api(`/api/training?from=${from}&to=${to}`),
   ]);
   Object.assign(S, { oncall: oc, requests: reqs, signins: sig, training: tr });
@@ -357,6 +358,7 @@ function showScreen(name) {
 function renderCurrent() {
   if (S.screen === "today") renderToday();
   else if (S.screen === "requests") renderRequests();
+  else if (S.screen === "shifts") renderShifts();
   else if (S.screen === "approvals") renderApprovals();
   else if (S.screen === "admin") renderAdmin();
 }
@@ -392,7 +394,7 @@ function renderToday() {
   for (const p of visibleEmployees()) {
     const me = p.employee === S.me.employee_number;
     html += `<tr class="${me ? "me" : ""}">`;
-    html += `<td class="person">${esc(p.name)}${me ? " (me)" : ""}<span class="m">${esc(p.employee)}${p.is_approver ? " • approver" : ""}</span></td>`;
+    html += `<td class="person">${esc(p.name)}${me ? " (me)" : ""}<span class="m">${esc(p.employee)}${p.is_approver ? " • admin" : ""}</span></td>`;
     days.forEach(d => {
       const isToday = d === td;
       const cell = cellHTML(p.employee, d);
@@ -439,10 +441,103 @@ function openDetail(emp, date) {
   for (const t of S.training.filter(x => x.employee === emp && x.start <= date && (x.end || x.start) >= date)) {
     evs.push(`<div class="ev"><b>Training</b> — ${esc(t.course)}<div class="t">${esc(t.start)} → ${esc(t.end || t.start)}</div></div>`);
   }
-  d.innerHTML = `<h3>${esc(p ? p.name : emp)}</h3><div class="m">${esc(emp)} • ${date}${p && p.is_approver ? " • approver" : ""}</div>
+  d.innerHTML = `<h3>${esc(p ? p.name : emp)}</h3><div class="m">${esc(emp)} • ${date}${p && p.is_approver ? " • admin" : ""}</div>
     ${evs.join("") || '<div class="m">No activity on this day.</div>'}
     <button class="btn" style="margin-top:14px" onclick="document.getElementById('cell-detail').style.display='none'">Close</button>`;
   d.style.display = "block";
+}
+
+// ---------- shifts (schedule hub: shift hours + on-call week; admins edit, all view) ----------
+function renderShifts() {
+  const el = $("#shifts-body");
+  if (!el) return;
+  const isAdmin = !!(S.me && S.me.is_approver);
+  const ws = S.shiftWeekStart;
+  const a = ws, b = addDays(ws, 6);
+  const weekLbl = `${a.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })} – ${b.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })}`;
+  const days = weekDays(ws);
+  const td = todayISO();
+  const opts = S.roster.map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(p.employee)})</option>`).join("");
+  el.innerHTML = `
+  <div class="card" style="margin-bottom:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div>
+        <div class="m" style="margin:0 0 4px">Shift hours (AST)</div>
+        <div style="font-size:22px;font-weight:700">${esc(S.settings.shift_start || "07:30")} – ${esc(S.settings.shift_end || "15:30")}</div>
+      </div>
+      ${isAdmin ? '<button class="btn" id="st-edit">Edit hours</button>' : '<span class="m">Set by an admin</span>'}
+    </div>
+    ${isAdmin ? `<div id="st-form" style="display:none;margin-top:14px">
+      <div class="inline-form">
+        <label>Start <input id="st-start" type="time" value="${esc(S.settings.shift_start || "07:30")}"></label>
+        <label>End <input id="st-end" type="time" value="${esc(S.settings.shift_end || "15:30")}"></label>
+        <button class="btn primary" id="st-save">Save</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Used for the sign-in/out window and reminders. Change for Ramadan (e.g. 09:30–15:30), then back.</div>
+    </div>` : ""}
+  </div>
+
+  <h3 style="margin:6px 0 8px">On-call — ${weekLbl}</h3>
+  <div class="weeknav" style="margin-bottom:10px">
+    <button class="btn" id="sh-prev">‹</button>
+    <span id="sh-label">${weekLbl}</span>
+    <button class="btn" id="sh-today">Today</button>
+    <button class="btn" id="sh-next">›</button>
+  </div>
+  ${isAdmin ? `<div class="inline-form" style="margin-bottom:10px">
+    <label>Assign <select id="sh-emp">${opts}</select></label>
+  </div>` : ""}
+  <table>
+    <tr><th>Day</th><th>Date</th><th>On-call</th>${isAdmin ? "<th></th>" : ""}</tr>
+    ${days.map((d, i) => {
+      const oc = S.oncall.find(o => o.date === d);
+      const p = oc ? person(oc.employee) : null;
+      return `<tr class="${d === td ? "today-col" : ""}">
+        <td>${DAYN[i]}</td><td>${d}</td>
+        <td>${oc ? `<b>${esc(p ? p.name : oc.employee)}</b> <span class="m">${esc(oc.employee)}</span>` : '<span class="m">—</span>'}</td>
+        ${isAdmin ? `<td>${oc
+          ? `<button class="btn danger sm" data-act="del" data-date="${d}" data-emp="${esc(oc.employee)}">Remove</button>`
+          : `<button class="btn sm" data-act="add" data-date="${d}">Assign</button>`}</td>` : ""}
+      </tr>`;
+    }).join("")}
+  </table>`;
+
+  // week nav
+  $("#sh-prev").addEventListener("click", () => { S.shiftWeekStart = addDays(S.shiftWeekStart, -7); renderShifts(); });
+  $("#sh-next").addEventListener("click", () => { S.shiftWeekStart = addDays(S.shiftWeekStart, 7); renderShifts(); });
+  $("#sh-today").addEventListener("click", () => { S.shiftWeekStart = startOfWeek(new Date()); renderShifts(); });
+
+  // shift-hours edit
+  if (isAdmin) {
+    $("#st-edit").addEventListener("click", () => { const f = $("#st-form"); f.style.display = f.style.display === "none" ? "block" : "none"; });
+    $("#st-save").addEventListener("click", async () => {
+      const s = $("#st-start").value, e2 = $("#st-end").value;
+      if (!s || !e2) return toast("Set both start and end", "err");
+      try {
+        await api("/api/admin/settings", { method: "POST", body: { name: "shift_start", value_str: s } });
+        await api("/api/admin/settings", { method: "POST", body: { name: "shift_end", value_str: e2 } });
+        toast(`Shift hours ${s}–${e2}`); await loadBase(); renderShifts();
+      } catch (err) { toast(err.message, "err"); }
+    });
+  }
+
+  // on-call assign / remove (admin)
+  if (isAdmin) {
+    el.querySelectorAll('button[data-act]').forEach(btn => btn.addEventListener("click", async () => {
+      const d = btn.dataset.date;
+      try {
+        if (btn.dataset.act === "del") {
+          await api(`/api/admin/oncall?emp=${encodeURIComponent(btn.dataset.emp)}&date=${d}`, { method: "DELETE" });
+          toast("Removed");
+        } else {
+          const emp = $("#sh-emp").value;
+          const r = await api("/api/admin/oncall", { method: "POST", body: { employeenumber: emp, dates: [d] } });
+          toast(`Assigned ${r.written} day(s)`);
+        }
+        await refresh(); renderShifts();
+      } catch (e) { toast(e.message, "err"); }
+    }));
+  }
 }
 
 // ---------- requests ----------
@@ -515,6 +610,7 @@ function renderAdmin() {
   $(`#tab-${S.adminTab}`).style.display = "block";
   if (S.adminTab === "sites") renderAdminSites();
   else if (S.adminTab === "oncall") renderAdminOnCall();
+  else if (S.adminTab === "logs") renderAdminLogs();
   else if (S.adminTab === "people") renderAdminPeople();
   else renderAdminSettings();
 }
@@ -529,7 +625,7 @@ function renderAdminSites() {
     <button class="btn ghost" type="button" id="sf-geo">📍 My location</button>
     <button class="btn primary" type="submit">Add site</button>
   </form>
-  <table><tr><th>Site</th><th>Lat</th><th>Lon</th><th>Radius</th><th>Enabled</th><th></th></tr>
+  <table><tr><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th></tr>
   ${S.sites.map(s => `<tr>
     <td><b>${esc(s.name)}</b>${s.note ? `<div class="m" style="color:var(--muted);font-size:11px">${esc(s.note)}</div>` : ""}</td>
     <td>${s.lat}</td><td>${s.lon}</td>
@@ -613,6 +709,76 @@ function renderAdminOnCall() {
     }
     toast("Removed"); await refresh();
   });
+}
+function renderAdminLogs() {
+  const el = $("#tab-logs");
+  const rows = (S.signins || []).slice(0, 100);
+  el.innerHTML = `
+    <div class="hint" style="margin-bottom:10px">Sign-in/out log (newest first). <b>Edit</b> to correct a record; <b>Delete</b> to remove it. Only admins can change logs.</div>
+    ${rows.length ? `
+    <table>
+      <tr><th>When (AST)</th><th>Person</th><th>Dir</th><th>Site</th><th>Allowed</th><th>Note</th><th></th></tr>
+      ${rows.map((s, i) => {
+        const p = person(s.employee);
+        return `
+        <tr>
+          <td>${fmtTime(s.at)}</td>
+          <td><b>${esc(p ? p.name : s.employee)}</b> <span class="m">${esc(s.employee)}</span></td>
+          <td>${s.direction === "in" ? "In" : "Out"}</td>
+          <td>${esc(s.site || "—")}</td>
+          <td>${s.allowed ? "✓" : "⚠"}</td>
+          <td class="m">${esc(s.note || "")}</td>
+          <td style="white-space:nowrap">
+            <button class="btn sm" data-log="edit" data-idx="${i}">Edit</button>
+            <button class="btn danger sm" data-log="del" data-idx="${i}">Delete</button>
+          </td>
+        </tr>
+        <tr class="log-edit" data-idx="${i}" style="display:none">
+          <td colspan="7">
+            <div class="inline-form">
+              <label>Direction <select class="le-dir">
+                <option value="in" ${s.direction === "in" ? "selected" : ""}>In</option>
+                <option value="out" ${s.direction === "out" ? "selected" : ""}>Out</option>
+              </select></label>
+              <label>Site <input class="le-site" value="${esc(s.site || "")}" maxlength="100"></label>
+              <label>Allowed <select class="le-allowed">
+                <option value="1" ${s.allowed ? "selected" : ""}>Yes</option>
+                <option value="0" ${!s.allowed ? "selected" : ""}>No</option>
+              </select></label>
+              <label>Note <input class="le-note" value="${esc(s.note || "")}" maxlength="300"></label>
+              <button class="btn primary sm" data-log="save" data-idx="${i}">Save</button>
+              <button class="btn sm" data-log="cancel" data-idx="${i}">Cancel</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join("")}
+    </table>` : '<div class="hint">No log entries yet.</div>'}
+  `;
+  el.querySelectorAll("[data-log]").forEach(btn => btn.addEventListener("click", async () => {
+    const i = parseInt(btn.dataset.idx, 10), act = btn.dataset.log;
+    const s = rows[i];
+    const editRow = el.querySelector(`.log-edit[data-idx="${i}"]`);
+    if (act === "edit") { editRow.style.display = "table-row"; return; }
+    if (act === "cancel") { editRow.style.display = "none"; return; }
+    if (act === "save") {
+      const body = {
+        id: s.id,
+        direction: editRow.querySelector(".le-dir").value,
+        site: editRow.querySelector(".le-site").value,
+        allowed: editRow.querySelector(".le-allowed").value === "1",
+        note: editRow.querySelector(".le-note").value,
+      };
+      try { await api("/api/admin/signins/update", { method: "POST", body }); toast("Log updated"); await refresh(); renderAdminLogs(); }
+      catch (e) { toast(e.message, "err"); }
+      return;
+    }
+    if (act === "del") {
+      const who = person(s.employee);
+      if (!confirm(`Delete log entry for ${who ? who.name : s.employee} (${s.direction}, ${fmtTime(s.at)})? This cannot be undone.`)) return;
+      try { await api("/api/admin/signins/delete", { method: "POST", body: { id: s.id } }); toast("Deleted"); await refresh(); renderAdminLogs(); }
+      catch (e) { toast(e.message, "err"); }
+    }
+  }));
 }
 function renderAdminPeople() {
   const el = $("#tab-people");
