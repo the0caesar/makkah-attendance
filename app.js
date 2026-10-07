@@ -104,14 +104,17 @@ function getMsal() {
 async function pkceToken() {
   const m = getMsal();
   if (!m) return null;
-  // MSAL v5 renamed handleRedirectPromise -> initialize; support both.
-  // The ?code= return trip MUST complete here; on failure record the reason
-  // (AUTH_ERR) so the auth screen shows why instead of looping silently.
+  // MSAL v5 split the old handleRedirectPromise() into TWO steps:
+  //   1. await initialize()          — storage bootstrap ONLY (does NOT touch the hash)
+  //   2. await handleRedirectPromise() — processes the ?code= / #code= return trip
+  // Both exist in the pinned v5.25.0 build; calling only initialize() silently
+  // ignores the returned code (observed: code in hash, no account, no error).
+  try { await m.initialize(); } catch (e) { /* non-fatal; continue to redirect handling */ }
   try {
-    if (m.initialize) await m.initialize(); else await m.handleRedirectPromise();
+    await m.handleRedirectPromise();
   } catch (e) {
     AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
-    console.warn("pkce initialize:", e);
+    console.warn("handleRedirectPromise:", e);
     return null;
   }
   const accounts = m.getAllAccounts();
