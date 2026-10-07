@@ -1,0 +1,12 @@
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "isEnabled": false
+    }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 7.0.0)"
+  }
+}

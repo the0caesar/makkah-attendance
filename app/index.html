@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Pulse — Attendance & On-Call</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <div>
+      <h1>Team Pulse</h1>
+      <div class="sub">Protection Team • Makkah</div>
+    </div>
+  </div>
+  <nav id="nav">
+    <button data-screen="today" class="active">Today</button>
+    <button data-screen="requests">Requests</button>
+    <button data-screen="approvals" id="nav-approvals" style="display:none">Approvals</button>
+    <button data-screen="admin" id="nav-admin" style="display:none">Admin</button>
+  </nav>
+  <div class="who" id="who">…</div>
+</header>
+
+<div id="banner" class="banner" style="display:none"></div>
+
+<main>
+  <!-- TODAY -->
+  <section id="screen-today" class="screen">
+    <div class="topbar">
+      <div class="signin-card" id="signin-card">
+        <div>
+          <div class="si-status" id="si-status">—</div>
+          <div class="si-detail" id="si-detail"></div>
+        </div>
+        <div class="si-buttons">
+          <button id="btn-signin" class="btn primary big">Sign In</button>
+          <button id="btn-signout" class="btn big">Sign Out</button>
+        </div>
+      </div>
+      <div class="weeknav">
+        <button id="wk-prev" class="btn">‹</button>
+        <span id="wk-label">—</span>
+        <button id="wk-next" class="btn">›</button>
+        <button id="wk-today" class="btn ghost">Today</button>
+        <button id="wk-refresh" class="btn ghost" title="Refresh">⟳</button>
+      </div>
+    </div>
+    <div class="grid-wrap">
+      <table class="grid" id="grid"></table>
+    </div>
+    <div id="cell-detail" class="detail" style="display:none"></div>
+  </section>
+
+  <!-- REQUESTS -->
+  <section id="screen-requests" class="screen" style="display:none">
+    <h2>My Requests</h2>
+    <form id="req-form" class="card">
+      <div class="formrow">
+        <label>Type <select id="rf-type" required></select></label>
+        <label>From <input type="date" id="rf-date" required></label>
+        <label>To <input type="date" id="rf-date2"></label>
+        <label>Other emp <input type="text" id="rf-other" placeholder="on-call swap" maxlength="20"></label>
+      </div>
+      <div class="formrow">
+        <label class="grow">Reason <input type="text" id="rf-reason" maxlength="300"></label>
+        <button class="btn primary" type="submit">Submit</button>
+      </div>
+      <div class="hint" id="rf-hint"></div>
+    </form>
+    <div id="my-requests"></div>
+  </section>
+
+  <!-- APPROVALS -->
+  <section id="screen-approvals" class="screen" style="display:none">
+    <h2>Pending Approvals</h2>
+    <div id="pending-list"></div>
+    <h2 style="margin-top:28px">Recently Decided</h2>
+    <div id="decided-list"></div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="screen-admin" class="screen" style="display:none">
+    <h2>Admin</h2>
+    <div class="tabs" id="admin-tabs">
+      <button data-tab="sites" class="active">Sites</button>
+      <button data-tab="oncall">On-Call</button>
+      <button data-tab="people">People</button>
+      <button data-tab="settings">Settings</button>
+    </div>
+    <div id="tab-sites" class="admin-tab"></div>
+    <div id="tab-oncall" class="admin-tab" style="display:none"></div>
+    <div id="tab-people" class="admin-tab" style="display:none"></div>
+    <div id="tab-settings" class="admin-tab" style="display:none"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast" style="display:none"></div>
+<script src="app.js"></script>
+</body>
+</html>

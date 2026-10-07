@@ -1,0 +1,5 @@
+node_modules/
+worker/.dev.vars
+**/.dev.vars
+*.log
+deploy/web/
