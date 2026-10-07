@@ -124,7 +124,24 @@ async function pkceToken() {
 function pkceLogin() {
   const m = getMsal();
   if (!m) return toast("Login library not loaded (CDN blocked?)", "err");
-  m.loginRedirect({ scopes: AUTH.scopes });
+  // Clear stale interaction state from a previous round trip that never completed
+  // (e.g. an exchange that failed). MSAL v5 silently refuses a new loginRedirect
+  // while `msal.interaction.status` lingers — that reads as "click does nothing".
+  try {
+    sessionStorage.removeItem("msal.interaction.status");
+    for (const k of Object.keys(sessionStorage)) {
+      if (k.startsWith("msal.") && (k.includes(".code.verifier") || k.includes(".request.origin") || k.includes(".request.params") || k.includes(".interaction.status"))) sessionStorage.removeItem(k);
+    }
+  } catch (e) { /* storage unavailable — proceed anyway */ }
+  try {
+    m.loginRedirect({ scopes: AUTH.scopes }).catch(e => {
+      AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
+      showAuthScreen("login");
+    });
+  } catch (e) {
+    AUTH_ERR = e.message || String(e);
+    showAuthScreen("login");
+  }
 }
 async function ensureAuth() {
   if (!API_BASE) return null; // dev: API dev identity, no login needed
