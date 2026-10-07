@@ -249,15 +249,16 @@ async function handleApi(env, method, path, q, body, m) {
   if (p === "/api/signins") {
     const days = parseInt(g("days", "7"), 10) || 7;
     const r = await call(env, "GET",
-      "new_signins?$select=new_signin_name,new_signin_employeenumber,new_signin_datetime,new_signin_direction,new_signin_allowed,new_signin_site,new_signin_accstr&$orderby=new_signin_datetime desc&$top=500");
+      "new_signins?$select=new_signinid,new_signin_name,new_signin_employeenumber,new_signin_datetime,new_signin_direction,new_signin_allowed,new_signin_site,new_signin_accstr,new_signin_note&$orderby=new_signin_datetime desc&$top=500");
     const out = [];
     if (r.status === 200 && isObj(r.body)) {
       for (const x of r.body.value || []) {
         out.push({
+          id: x.new_signinid,
           employee: x.new_signin_employeenumber, at: x.new_signin_datetime,
           direction: x.new_signin_direction === DIR_IN ? "in" : "out",
           allowed: x.new_signin_allowed === ALLOWED_YES, site: x.new_signin_site,
-          accuracy: fnum(x.new_signin_accstr),
+          accuracy: fnum(x.new_signin_accstr), note: x.new_signin_note || "",
         });
       }
     }
@@ -416,7 +417,7 @@ async function handleApi(env, method, path, q, body, m) {
         : [{ error: "write failed", code: r2.status }, 400];
     }
     if (action === "approve" || action === "reject") {
-      if (!m.is_approver) return [{ error: "forbidden: approver only" }, 403];
+      if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
       const r2 = await call(env, "PATCH", `new_requestses(${rid})`, {
         new_requests_status: action === "approve" ? ST_APPROVED : ST_REJECTED,
         new_requests_approver: m.email,
@@ -427,12 +428,10 @@ async function handleApi(env, method, path, q, body, m) {
         const d = d10(row.new_requests_date);
         const emp = row.new_requests_employeenumber;
         if (row.new_requests_otheremp) {
-          // parity note: api_core.py:344 pre-quotes this filter (safe="'") and the outer
-          // qpath re-encodes '%' -> silent no-op in practice (best-effort pre-delete).
-          const r3 = await call(env, "GET", "new_oncalls?$select=new_oncall_name&$filter=" + qstrict(
-            `(new_oncall_employeenumber eq '${row.new_requests_otheremp}') and (new_oncall_date eq datetime'${d}T00:00:00Z')`));
+          const r3 = await call(env, "GET",
+            `new_oncalls?$select=new_oncallid&$filter=(new_oncall_employeenumber eq '${row.new_requests_otheremp}') and (new_oncall_date eq ${d}T00:00:00Z)`);
           if (r3.status === 200 && isObj(r3.body)) {
-            for (const o of r3.body.value || []) await call(env, "DELETE", `new_oncalls('${o.new_oncall_name}')`);
+            for (const o of r3.body.value || []) await call(env, "DELETE", `new_oncalls(${o.new_oncallid})`);
           }
         }
         const r4 = await call(env, "POST", "new_oncalls", {
@@ -451,7 +450,7 @@ async function handleApi(env, method, path, q, body, m) {
 
   // ---------- admin ----------
   if (p.startsWith("/api/admin/")) {
-    if (!m.is_approver) return [{ error: "forbidden: approver only" }, 403];
+    if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
     const ap = p.slice("/api/admin/".length);
 
     if (ap === "oncall" && method === "POST") {
@@ -463,9 +462,9 @@ async function handleApi(env, method, path, q, body, m) {
       for (let d of dates) {
         d = String(d).slice(0, 10);
         const r = await call(env, "GET",
-          `new_oncalls?$select=new_oncall_name&$filter=(new_oncall_employeenumber eq '${emp}') and (new_oncall_date eq datetime'${d}T00:00:00Z')`);
+          `new_oncalls?$select=new_oncallid,new_oncall_name&$filter=(new_oncall_employeenumber eq '${emp}') and (new_oncall_date eq ${d}T00:00:00Z)`);
         if (r.status === 200 && isObj(r.body)) {
-          for (const o of r.body.value || []) await call(env, "DELETE", `new_oncalls('${o.new_oncall_name}')`);
+          for (const o of r.body.value || []) await call(env, "DELETE", `new_oncalls(${o.new_oncallid})`);
         }
         const r2 = await call(env, "POST", "new_oncalls", {
           new_oncall_name: `OC • ${emp} • ${d}`.slice(0, 120),
@@ -482,12 +481,12 @@ async function handleApi(env, method, path, q, body, m) {
     if (ap === "oncall" && method === "DELETE") {
       const emp = g("emp", ""), d = g("date", "").slice(0, 10);
       const r = await call(env, "GET",
-        `new_oncalls?$select=new_oncall_name&$filter=(new_oncall_employeenumber eq '${emp}') and (new_oncall_date eq datetime'${d}T00:00:00Z')`);
+        `new_oncalls?$select=new_oncallid&$filter=(new_oncall_employeenumber eq '${emp}') and (new_oncall_date eq ${d}T00:00:00Z)`);
       let n = 0;
       if (r.status === 200 && isObj(r.body)) {
         for (const o of r.body.value || []) {
-          const r2 = await call(env, "DELETE", `new_oncalls('${o.new_oncall_name}')`);
-          if (r2.status === 200) n += 1;
+          const r2 = await call(env, "DELETE", `new_oncalls(${o.new_oncallid})`);
+          if ([200, 204].includes(r2.status)) n += 1;
         }
       }
       return { ok: true, deleted: n };
@@ -558,6 +557,33 @@ async function handleApi(env, method, path, q, body, m) {
       return [200, 201, 204].includes(r2.status)
         ? { ok: true }
         : [{ error: "write failed", code: r2.status, body: String(r2.body).slice(0, 200) }, 400];
+    }
+
+    if (ap === "signins/delete" && method === "POST") {
+      const b = body || {};
+      const id = String(b.id || "").trim();
+      if (!id) return [{ error: "id required" }, 400];
+      const r = await call(env, "DELETE", `new_signins(${id})`);
+      return [200, 204].includes(r.status)
+        ? { ok: true }
+        : [{ error: "delete failed", code: r.status, body: String(r.body).slice(0, 200) }, 400];
+    }
+
+    if (ap === "signins/update" && method === "POST") {
+      const b = body || {};
+      const id = String(b.id || "").trim();
+      if (!id) return [{ error: "id required" }, 400];
+      const pay = {};
+      if ("direction" in b) pay.new_signin_direction = b.direction === "in" ? DIR_IN : DIR_OUT;
+      if ("allowed" in b) pay.new_signin_allowed = b.allowed ? ALLOWED_YES : 100000002;
+      if ("site" in b) pay.new_signin_site = String(b.site).slice(0, 100);
+      if ("note" in b) pay.new_signin_note = String(b.note).slice(0, 300);
+      if ("datetime" in b && b.datetime) pay.new_signin_datetime = String(b.datetime);
+      if (!Object.keys(pay).length) return [{ error: "no fields to update" }, 400];
+      const r = await call(env, "PATCH", `new_signins(${id})`, pay);
+      return r.status === 200
+        ? { ok: true }
+        : [{ error: "update failed", code: r.status, body: String(r.body).slice(0, 200) }, 400];
     }
 
     return [{ error: "unknown admin endpoint" }, 404];

@@ -112,11 +112,11 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 ⚠️ Integer col capped at 100 → times/strings go in `new_value_str`.
 
 ### new_signin (per event)
-`new_signin_name` (primary: "EMP • 2026-10-07 07:31 • IN") • `new_signin_employeenumber` (10) • `new_signin_datetime` (DateTime, UTC) • `new_signin_direction` (picklist **100000001=Sign In / 100000002=Sign Out**) • `new_signin_latstr` / `new_signin_lonstr` / `new_signin_accstr` (String — location, see gotcha: Decimals broken) • `new_signin_allowed` (picklist **100000001=Yes / 100000002=No**) • `new_signin_site` (String 100, matched site name) • `new_signin_note` (String 300)
+**Primary key = `new_signinid` (GUID).** `new_signin_name` ("EMP • 2026-10-07 07:31 • IN") is a *display column*, NOT the key — string-key resource addressing (`new_signins('…')`) 400s in this org (see gotcha #24). Address/PATCH/DELETE by `new_signinid`. • `new_signin_employeenumber` (10) • `new_signin_datetime` (DateTime, UTC) • `new_signin_direction` (picklist **100000001=Sign In / 100000002=Sign Out**) • `new_signin_latstr` / `new_signin_lonstr` / `new_signin_accstr` (String — location, see gotcha: Decimals broken) • `new_signin_allowed` (picklist **100000001=Yes / 100000002=No**) • `new_signin_site` (String 100, matched site name) • `new_signin_note` (String 300)
 (Decimal columns `new_signin_latitude/longitude/accuracy` exist but are **dead** — writes silently drop to NULL in this env; do not use.)
 
 ### new_oncall (published schedule)
-`new_oncall_name` (primary) • `new_oncall_employeenumber` (10) • `new_oncall_date` (DateOnly) • `new_oncall_source` (picklist **100000001=Published Rotation / 100000002=Approved Request / 100000003=Manual Entry**) • `new_oncall_assignedby` (String 200) • `new_oncall_request` (String 150, linking request name)
+**Primary key = `new_oncallid` (GUID)** (address/delete by it, not `new_oncall_name`). • `new_oncall_name` (display: "OC • EMP • date") • `new_oncall_employeenumber` (10) • `new_oncall_date` (DateOnly) • `new_oncall_source` (picklist **100000001=Published Rotation / 100000002=Approved Request / 100000003=Manual Entry**) • `new_oncall_assignedby` (String 200) • `new_oncall_request` (String 150, linking request name)
 
 ### new_requests (unified engine — the live source of truth for ALL requests)
 | Column | Type | Notes |
@@ -181,12 +181,20 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 - On: regular users see only their own row; approvers/supervisors still see all.
 - Enforced in the **proxy/app API layer** (filter by employee number from the authenticated identity) — Dataverse row-level security is NOT used.
 
-### 5.6 Admin screen (approvers only)
-- **Sites:** map picker (click = lat/lon) + radius; enable/disable; manual coords fallback.
+### 5.6 Admin screen (admins only)
+- Terminology: **"admin"**, not "approver" (UI + API error text). `is_approver` is the internal field; display is "admin".
+- **Sites:** map picker (click = lat/lon) + radius (meters — UI label "Radius (m)"); enable/disable; manual coords fallback.
 - **On-call rotation:** assign whole week per person (Sun–Sat) → writes `new_oncall` rows (source = Published Rotation).
+- **Logs:** newest-first sign-in/out list (last 30 days). Admin can **edit** (direction, site, allowed, note) and **delete** any record via `/api/admin/signins/update` + `/api/admin/signins/delete` (addressed by `new_signinid` GUID).
 - **Approvers:** toggle `new_employees_isapprover` per person.
 - **Identity linking:** match `new_employees.new_teams_email` ← the person's Entra email (one-time setup screen shown to anyone not yet linked).
 - **Settings:** edit all `new_settings` rows (shift times, limits, reminder timing, toggles).
+
+### 5.8 Shifts tab (schedule hub — visible to everyone)
+A dedicated top-level tab (Today / **Requests / Shifts** / Approvals / Admin) between Requests and Approvals.
+- **Shift hours card:** shows configured `shift_start`–`shift_end` (AST). **Admins** can edit inline (start/end time inputs → `/api/admin/settings`); non-admins see it read-only ("Set by an admin"). This is the RAMADAN lever: change to 09:30–15:30 (or any) for the month, then back — no code change (Worker reads configured values for the hard block + reminders).
+- **On-call week:** Sun–Sat schedule with prev/today/next week nav. **Admins** pick a person + assign/remove per day (reuses `/api/admin/oncall` POST/DELETE); **non-admins** see the read-only schedule.
+- Design is "best-effort v1" — Essam will refine after use.
 
 ### 5.7 Reminders (Worker cron, v1)
 - **v1 (BUILT, LOCAL VERIFIED 2026-10-07):** Worker cron trigger `*/5 * * * *` (free, 1 of 5) → `scheduled()` reads settings + roster + today's sign-ins + approved absence requests → pure `reminderPlan()` computes who is due (T−`reminder_lead_minutes` first, repeat every `reminder_interval_minutes`, stop after `reminder_stop_after_minutes`; AST/UTC+3 math; skips people with approved absence today; latest signin direction wins) → POSTs `@email …` to a **Teams channel incoming-webhook** (`REMINDER_WEBHOOK_URL` secret, @email mentions notify the person). Dev dry-run endpoint `/api/reminders/plan?now=…` (dev hatch only, never sends).
@@ -245,8 +253,39 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 21. **PP environment-scoped API: `powerautomate` namespace ≠ `powerapps` scopes** — a valid `api.powerplatform.com` MSAL token (from the make.powerapps.com portal) gets 200 on `powerapps/apps/*` but **401** on `powerautomate/flows` (supported versions: 2024-10-01, 2026-05-01-preview, …). The portal's client app (a8f7a65c) has no cloud-flow scopes in its `.default` set; no flow token in the MSAL cache; mgmt-provider path 404s. ⇒ cloud flows can't be created headless from the portal session; use Worker cron instead (chosen) or admin/interactive path.
 22. **`node --check` on `worker/index.js` always fails (false alarm)** — no `type:module` in package.json, Node 26 checks it as CJS and chokes on `export`. Check via a `.mjs` copy: `cp worker/index.js /scratch/wchk.mjs && node --check wchk.mjs`. Same trap as the app.js browser-ESM note (§8.17-era).
 23. **workers.dev subdomain registration API = `PUT`, not `POST`** — `POST /accounts/{id}/workers/subdomain` → 405 "Method not allowed for this authentication scheme" (that message is misleading: it's the method, not the auth). Correct: `PUT /accounts/{id}/workers/subdomain` with body `{"subdomain": "<name>"}` (NOT `{"name": …}` → 400 "Subdomain '' is invalid"). Wrangler's `wrangler deploy` interactive prompt can't be answered in a non-PTY terminal (silently falls back to "no"). Also: fresh workers.dev hostnames fail TLS handshake (`SEC_E_ILLEGAL_MESSAGE`) for ~1–2 min after deploy — cert propagation; DNS resolves immediately, don't panic.
+24. **String-key resource addressing FAILS in this org** — `new_signins('EMP • 2026-10-07 18:34 • OUT')` (quoted string key) → 400 "Error in query syntax", same as the GUID-quoted case (gotcha #11). Every entity here has a `<name>id` GUID key (`new_signinid`, `new_oncallid`, …) that IS the real primary key; the `*_name` column is a *display* string. **Address/PATCH/DELETE by the bare GUID** (`new_signins(guid)`), and filter by the display name with `$filter=... eq '…'` only to FIND the guid first. The old on-call delete used the string key → silently deleted nothing.
+25. **On-call lookups used `datetime'…'` literals + string-key deletes → both broken in this org (FIXED 2026-10-07).** The `new_oncall_date eq datetime'…T00:00:00Z'` filter (gotcha #14) 400s (parsed as Edm.String), so on-call assign pre-delete + remove never matched; combined with gotcha #24 the deletes no-op'd. Fix: raw unquoted ISO in the filter (`new_oncall_date eq 2026-10-07T00:00:00Z`) + `DELETE new_oncalls(guid)` by `new_oncallid`. Apply to all three on-call sites (assign pre-delete, remove, request-swap pre-delete).
+26. **`/api/signins` history window** was `?days=2` (only last 2 days) — too short for the admin Logs tab. Bumped to `?days=30` (Worker still caps `$top=500`). Side benefit: the grid now shows sign-in badges for past weeks when navigated.
+
+## 8b. BACKLOG (UI polish — deferred per Essam 2026-10-07)
+1. **Grid shows REJECTED requests as absence badges** (rejected vacation still visible on the calendar with "rejected"). Decide: grid should show approved absences only (+ optionally pending with a distinct marker). Filter lives in `requestsFor()` (app.js, currently excludes only cancelled).
+2. **No reason/comment on approve/reject** — approver email is recorded, but no free-text comment. (Schema check needed: does new_requests have a comment/reason column for decisions? `new_requests_reason` exists on the request itself.)
+3. **"Recently decided" list can't be cleared** — auto-prunes after 7 days (`cutoff = now-7d`); Essam wants a manual clear.
+4. **On-call editor is duplicated** — the new Shifts tab AND the Admin → On-Call sub-tab both assign/remove on-call. Consider collapsing the Admin sub-tab into a pointer to the Shifts tab once Essam confirms the Shifts design. (Refine later.)
+
+### BUILT 2026-10-07 (this round — done, not backlog)
+- **Shifts tab** (new top-level nav): shift-hours card (admin editable — the Ramadan lever) + on-call week (admin assign/remove, all view).
+- **Admin → Logs** sub-tab: edit (direction/site/allowed/note) + delete sign-in records, keyed by `new_signinid`.
+- **Terminology** → "admin" (UI + API error text). **Radius (m)** label on the Sites table.
+- **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-07 (Shifts tab + admin Logs + terminology + data-layer bug fixes)
+- **New features (live):** (a) **Shifts tab** — top-level nav, everyone sees it; shift-hours card (admins edit via `/api/admin/settings`, the Ramadan lever) + on-call week (admins assign/remove per day, reuse `/api/admin/oncall`; non-admins read-only). (b) **Admin → Logs** sub-tab — newest-first sign-in/out (30 days); admin **edit** (direction/site/allowed/note) + **delete** any record. (c) **Terminology → "admin"** (UI + API error text; `is_approver` stays the internal field). (d) **Radius (m)** label on the Sites table.
+- **Two data-layer bugs found + fixed (verified live):** (1) string-key resource addressing 400s in this org — every entity's real key is its `<name>id` GUID (`new_signinid`, `new_oncallid`); the `*_name` column is display-only. Admin log endpoints now address by bare GUID. (2) on-call lookups used `datetime'…'` literals (400, gotcha #14) + string-key deletes → on-call assign pre-delete + remove silently no-op'd. Fixed all three on-call sites (raw ISO filter + `new_oncalls(guid)`). **Gotchas #24–#26.**
+- **`/api/signins`** now returns `id` (new_signinid GUID) + `note`; history window 2d→30d.
+- **Verified live:** admin log UPDATE round-trip (set note → read back → revert), GUID addressing, live Pages build (Shifts nav + renderShifts/renderAdminLogs present), manifest v1.0.4 + zip rebuilt.
+- **Deployed:** Worker (new admin-log endpoints + on-call fixes) + Pages `app.js?v=20261007e` + Teams manifest **v1.0.4** (`contentUrl ?v=20261007e`).
+- **Open for Essam:** test Shifts tab (edit shift hours, assign on-call) + Admin → Logs (edit/delete a record). See also the 3 earlier UI-polish backlog items (§8b).
+
+### 2026-10-07 (identity COMPLETE: Teams SSO + context fallback + number-match + mobile)
+- **Teams tab installed & live** (sideloaded zip). Identity chain working end-to-end on desktop + phone.
+- **SSO resource rule (MS Teams toolkit team, issue #2039):** `webApplicationInfo.resource` must be `api://<tab-app domain>/<client id>` — Teams rejects SSO when the resource domain ≠ iframe origin ("App resource defined in manifest and iframe origin do not match"). Fixed: `api://the0caesar.github.io/0cf32ba0…`.
+- **Context-identity fallback:** when SSO is refused, `getContext().user` UPN (Teams-injected) becomes an unsigned JWT → Worker decode-only (v1 security note; RS256 hardening = 8b).
+- **Number-match identity (primary):** UPN embeds the employee number (`70180@SEC.se.com.sa` → `70180` → roster number). Verified live via `/api/whoami` → `{70180, Essam Al-Ahmadi, is_approver, linked}`. Email match kept as silent fallback (all 22 UPNs start with their number — per Essam).
+- **Mobile fix:** mobile Teams loads tabs in a TOP-LEVEL webview (not an iframe) — iframe-only detection sent mobile to the broken browser-PKCE path. Fix: `teamsContextProbe()` = UA sniff (`/teams/i`) + `getContext()` resolve (5s timeout). Works desktop + mobile.
+- **Desktop GPS sign-in verified by Essam** (sign-in + sign-out ✓ desktop; requests + self-reject exercised).
 
 ### 2026-10-07 (SSO cutover — CDN + boot-hang fixes)
 - **"Login library not loaded (CDN blocked?)" root cause = MY BUG, not tenant:** index.html referenced `alcdn.msauth.net/browser/3.20.3` + `res.cdn.office.net/teams-js/2.26.2` — both **404 (phantom versions that don't exist** on any CDN). Fixed: self-hosted **MSAL v5.25.0** + **teams-js v2.57.0** (UMD globals `msal` / `microsoftTeams` verified) in the Pages repo — same-origin, filter-proof.
