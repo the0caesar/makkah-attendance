@@ -98,6 +98,27 @@
 </main>
 
 <div id="toast" class="toast" style="display:none"></div>
+
+<!-- AUTH (hidden unless needed) -->
+<section id="auth-screen" style="display:none;max-width:520px;margin:48px auto;padding:28px;border:1px solid var(--border,#333);border-radius:12px">
+  <div id="auth-mode-login">
+    <h2>Sign in</h2>
+    <p class="hint">Use your company work account. Your email is matched to the team roster automatically.</p>
+    <button id="btn-auth-login" class="btn primary big" style="width:100%">Sign in with work account</button>
+    <p class="hint" style="margin-top:14px">Inside Teams the app signs you in automatically — no button needed there.</p>
+  </div>
+  <div id="auth-mode-unlinked" style="display:none">
+    <h2>Almost there</h2>
+    <p class="hint">You're signed in as</p>
+    <p id="unlinked-email" style="font-size:18px;font-weight:700;word-break:break-all">—</p>
+    <p class="hint">but this email isn't linked to a roster person yet. Copy it and ask your supervisor to link it in <b>Admin → People</b> (one time).</p>
+    <button id="btn-auth-copy" class="btn primary" style="width:100%">Copy my email</button>
+    <p class="hint" style="margin-top:14px">After the link is saved, reload this app.</p>
+  </div>
+</section>
+
+<script src="https://res.cdn.office.net/teams-js/2.26.2/teams.js"></script>
+<script src="https://alcdn.msauth.net/browser/3.20.3/js/msal-browser.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
