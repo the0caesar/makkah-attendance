@@ -3,7 +3,10 @@
 > **SOURCE OF TRUTH.** If the chat dies, this file is where we resume.
 > Read this file FIRST before doing any work on this project.
 > Update §7 (Build State) and §9 (Session Log) after every milestone.
-> Last updated: **2026-10-07**
+> **DURABLE LOG (Essam's standing instruction, 2026-10-07):** EVERYTHING discussed or decided
+> about this app — requirements, corrections, design decisions, "refine later" items — gets logged
+> here (session log + relevant sections). Nothing app-related lives only in chat.
+> Last updated: **2026-10-07 (night — shifts redefinition logged; focus = perfecting sign-in/out)**
 
 ## 1. Goal
 
@@ -190,11 +193,23 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 - **Identity linking:** match `new_employees.new_teams_email` ← the person's Entra email (one-time setup screen shown to anyone not yet linked).
 - **Settings:** edit all `new_settings` rows (shift times, limits, reminder timing, toggles).
 
-### 5.8 Shifts tab (schedule hub — visible to everyone)
-A dedicated top-level tab (Today / **Requests / Shifts** / Approvals / Admin) between Requests and Approvals.
-- **Shift hours card:** shows configured `shift_start`–`shift_end` (AST). **Admins** can edit inline (start/end time inputs → `/api/admin/settings`); non-admins see it read-only ("Set by an admin"). This is the RAMADAN lever: change to 09:30–15:30 (or any) for the month, then back — no code change (Worker reads configured values for the hard block + reminders).
-- **On-call week:** Sun–Sat schedule with prev/today/next week nav. **Admins** pick a person + assign/remove per day (reuses `/api/admin/oncall` POST/DELETE); **non-admins** see the read-only schedule.
-- Design is "best-effort v1" — Essam will refine after use.
+### 5.8 Shifts (REAL work shifts — **NOT** on-call; redefined by Essam 2026-10-07 night)
+**CORRECTED UNDERSTANDING (supersedes the v1 "schedule hub" interpretation):** "Shifts" = the team going **on shifts** — work periods lasting **a month-ish** (less than, equal to, or more than a month). This is a *different beast* from on-call (on-call stays as its own per-day feature, untouched).
+
+A shift (per Essam) has at least:
+- **Type** — a selectable kind of shift (list of types TBD with Essam)
+- **How many people** — headcount of the shift
+- **Shift in-charge** — who leads the shift
+- **Duration** — start/end (weeks/months; "<, =, or > 1 month")
+- "…and all of that" — details to be refined with Essam
+
+**Status:** the currently-live Shifts tab (shift-hours card + on-call week) was built under the *old* (wrong) interpretation as a best-effort v1. It **remains as a placeholder** (shift-hours card is still useful — it's the Ramadan lever) but the **on-call week section does NOT represent shifts** and the tab will be **reworked** to the real shift model once designed with Essam.
+
+**Design + data model (NOT yet built — discuss with Essam tomorrow):**
+- Likely a new entity (e.g. `new_shifts`): type (string, extensible like request types), headcount, in-charge (person), start date, end date, plus members (m:m or list). Exact schema = TBD, to be confirmed before building.
+- UI: shift list (active/upcoming/past) + create/edit (admin) + grid integration (people × days shows which shift a person is on).
+- Relationship to grid: a person "on a shift" should be visible in the team grid for the shift's date range.
+- Open questions for Essam: shift type list? Can a person be on two shifts? How does sign-in/out relate to being on a shift (does it affect the time window)? Approval flow for creating shifts (admin only)?
 
 ### 5.7 Reminders (Worker cron, v1)
 - **v1 (BUILT, LOCAL VERIFIED 2026-10-07):** Worker cron trigger `*/5 * * * *` (free, 1 of 5) → `scheduled()` reads settings + roster + today's sign-ins + approved absence requests → pure `reminderPlan()` computes who is due (T−`reminder_lead_minutes` first, repeat every `reminder_interval_minutes`, stop after `reminder_stop_after_minutes`; AST/UTC+3 math; skips people with approved absence today; latest signin direction wins) → POSTs `@email …` to a **Teams channel incoming-webhook** (`REMINDER_WEBHOOK_URL` secret, @email mentions notify the person). Dev dry-run endpoint `/api/reminders/plan?now=…` (dev hatch only, never sends).
@@ -264,12 +279,18 @@ A dedicated top-level tab (Today / **Requests / Shifts** / Approvals / Admin) be
 4. **On-call editor is duplicated** — the new Shifts tab AND the Admin → On-Call sub-tab both assign/remove on-call. Consider collapsing the Admin sub-tab into a pointer to the Shifts tab once Essam confirms the Shifts design. (Refine later.)
 
 ### BUILT 2026-10-07 (this round — done, not backlog)
-- **Shifts tab** (new top-level nav): shift-hours card (admin editable — the Ramadan lever) + on-call week (admin assign/remove, all view).
+- **Shifts tab (v1 placeholder — REWORK DUE):** built under the old "schedule hub" interpretation; Essam redefined Shifts as real work shifts (see §5.8). Keep the shift-hours card (Ramadan lever); the on-call-week section does NOT represent shifts. **Next: design real shift model with Essam.**
 - **Admin → Logs** sub-tab: edit (direction/site/allowed/note) + delete sign-in records, keyed by `new_signinid`.
 - **Terminology** → "admin" (UI + API error text). **Radius (m)** label on the Sites table.
 - **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-07 (night — Essam redefines "Shifts"; focus shifts to sign-in/out)
+- **CORRECTION (Essam, 22:00):** "Shifts" was misunderstood. It is **NOT on-call** — it's **real work shifts**: the team goes on shifts for ~a month (less/equal/more). A shift has: **type** (selectable kind), **how many people**, **shift in-charge**, **duration**. On-call is a separate feature (stays as-is). The live Shifts tab is a **v1 placeholder** under the old interpretation → to be **reworked** to the real shift model (§5.8 now has the corrected spec + open questions).
+- **Durable-log instruction (standing):** everything discussed/decided about this app gets logged in THIS SPEC — not just in chat. (Recorded in the file header.)
+- **Priority (per Essam):** **perfect sign-in/out** is the main focus for tomorrow. Shifts design comes after.
+- **Status at end of day:** all of today's builds (Shifts placeholder tab, admin Logs, terminology, radius label, hard time block, number-match identity, on-call GUID/datetime fixes) are **deployed + verified live**; Teams v1.0.4 zip delivered to Essam for re-install.
 
 ### 2026-10-07 (Shifts tab + admin Logs + terminology + data-layer bug fixes)
 - **New features (live):** (a) **Shifts tab** — top-level nav, everyone sees it; shift-hours card (admins edit via `/api/admin/settings`, the Ramadan lever) + on-call week (admins assign/remove per day, reuse `/api/admin/oncall`; non-admins read-only). (b) **Admin → Logs** sub-tab — newest-first sign-in/out (30 days); admin **edit** (direction/site/allowed/note) + **delete** any record. (c) **Terminology → "admin"** (UI + API error text; `is_approver` stays the internal field). (d) **Radius (m)** label on the Sites table.
