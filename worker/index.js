@@ -309,6 +309,16 @@ async function handleApi(env, method, path, q, body, m) {
     const direction = b.direction === "in" ? DIR_IN : DIR_OUT;
     const lat = b.latitude, lon = b.longitude;
     const settings = await getSettings(env);
+    // Time-window hard block (shift_start–shift_end, AST). Reads the CONFIGURED
+    // shift times so a Ramadan shift (or any change) only needs a settings update,
+    // never a code change. Applied to sign-in AND sign-out.
+    const nowAst = new Date(Date.now() + AST_OFFSET_MIN * 60000);
+    const nowMin = nowAst.getUTCHours() * 60 + nowAst.getUTCMinutes();
+    const winStart = hhmmToMin(settings.shift_start);
+    const winEnd = hhmmToMin(settings.shift_end);
+    if (winStart != null && winEnd != null && (nowMin < winStart || nowMin > winEnd)) {
+      return [{ error: `outside work hours (${settings.shift_start}–${settings.shift_end} AST)`, allowed: false }, 400];
+    }
     const enforceOut = String(settings.enforce_signout_location ?? "1") === "1";
     const noLoc = lat === null || lat === undefined || lon === null || lon === undefined;
     if (direction === DIR_IN && noLoc) return [{ error: "location required — cannot sign in without GPS" }, 400];
