@@ -3,6 +3,9 @@
   "name": "makkah-attendance-api",
   "main": "index.js",
   "compatibility_date": "2025-09-01",
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "DV_ORG_URL": "https://org951b4d88.crm4.dynamics.com",
     "DV_TENANT_ID": "22e3bb8f-9a96-48bd-99f8-f652d83d904c",

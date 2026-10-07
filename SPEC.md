@@ -188,9 +188,9 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 - **Identity linking:** match `new_employees.new_teams_email` ← the person's Entra email (one-time setup screen shown to anyone not yet linked).
 - **Settings:** edit all `new_settings` rows (shift times, limits, reminder timing, toggles).
 
-### 5.7 Reminders (flow, not web app)
-- Power Automate scheduled flow (free in env): every 5–10 min, check settings + shift start/end; at T−30 min send first Teams 1:1 message to people not signed in (or not signed out), repeat every `reminder_interval_minutes`, stop after `reminder_stop_after_minutes`.
-- Production note: written up in §7 when built.
+### 5.7 Reminders (Worker cron, v1)
+- **v1 (BUILT, LOCAL VERIFIED 2026-10-07):** Worker cron trigger `*/5 * * * *` (free, 1 of 5) → `scheduled()` reads settings + roster + today's sign-ins + approved absence requests → pure `reminderPlan()` computes who is due (T−`reminder_lead_minutes` first, repeat every `reminder_interval_minutes`, stop after `reminder_stop_after_minutes`; AST/UTC+3 math; skips people with approved absence today; latest signin direction wins) → POSTs `@email …` to a **Teams channel incoming-webhook** (`REMINDER_WEBHOOK_URL` secret, @email mentions notify the person). Dev dry-run endpoint `/api/reminders/plan?now=…` (dev hatch only, never sends).
+- **Why not the Flow-bot 1:1 (v2):** PP environment-scoped API `powerautomate` namespace 401s on the portal's MSAL token (no cloud-flow scopes on that client; Graph probe token expired) — a scheduled flow needs an admin/tenant path we can't verify headless. Channel @mention satisfies the functional requirement (T−30, every 10 min, stop-after) with zero setup cost. **v2 upgrade = 1:1 via Flow-bot flow or bot**, when the tenant allows it (needs Essam's UI time or admin).
 
 ## 6. Extensibility (confirmed requirement)
 
@@ -210,8 +210,8 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 | 5 | Run locally + verify with real data | ✅ DONE | `e2e_test.sh` **19/19 PASS** 2026-10-07 (geofence block/allow, request lifecycle, on-call swap→schedule, approvals, cancels); test rows wiped |
 | 6 | Teams packaging (manifest + icons + zip) | ✅ DONE (v1) | `teams/manifest.json` (v1.16), generated icons (clock motif), `makkah-attendance-teams-app.zip` (3 files, verified), `DEPLOY.md` — **URL now real (Pages live)**. **Manifest v2 PENDING:** `webApplicationInfo{id,resource}` (needs new Entra client ID), `devicePermissions:["geolocation"]`, `validDomains` |
 | 7 | **API port to JS + Cloudflare Worker** | 🟡 LOCAL VERIFIED | `worker/index.js` = faithful JS port of `api_core.py`; `wrangler.jsonc` + `.dev.vars` (gitignored) + `README.md`. **`e2e_worker.sh` 20/20 PASS** 2026-10-07 against local `wrangler dev` (Miniflare, no account): geofence block/allow, request lifecycle, on-call swap→schedule, admin ops, settings, roster, live-Pages static. Test rows wiped. Parity fixes found by E2E: (a) Dataverse PATCH/POST return 204 → Python `call_h` hardcoded 200 on any 2xx; Worker now maps `resp.ok → 200` (else handlers see "write failed: 204"); (b) `(payload, code)` tuple vs legit array payloads → dispatch checks `length===2 && typeof res[1]==='number'`. **REMAINING:** deploy to live Worker (needs free CF account) + E2E against live URL + `API_BASE` in app.js |
-| 8 | Identity: Entra reg + SSO/PKCE in app.js | ⬜ NEXT | new app registration (Essam, 5 min, settings prepared); MSAL.js SSO + PKCE fallback + link screen; manifest v2 rebuild + zip |
-| 9 | Reminders: Power Automate scheduled flow | ⬜ NEXT | verified pattern (§3); try env-API flow creation headless first (PP JWT); fallback: UI recipe or driven UI |
+| 8 | Identity: Entra reg + SSO/PKCE in app.js | 🟡 LOCAL VERIFIED | **Code done + tested:** MSAL SSO + PKCE fallback + link screen in app.js; worker 401 (no token) vs 403+email (unlinked) — `test_identity.mjs` 5/5 PASS vs live Dataverse (linked→200 prod identity, case-insensitive, unknown→403, no-token→401, garbage→401). **REMAINING (Essam):** create the Entra user-facing app registration (settings prepared, 5 min) → paste client_id into `app.js` AUTH + manifest `webApplicationInfo{id, resource}` → SSO live test |
+| 9 | Reminders | 🟡 LOCAL VERIFIED | **v1 = Worker cron + channel-webhook @mention** (§5.7): `reminderPlan()` pure + `scheduled()`; `test_reminders.mjs` 10/10 PASS (windows, 10-min boundaries, stop-after, latest-direction, vacation exclusion); live dry-run `/api/reminders/plan?now=2026-10-08T04:00:00Z` returned correct due list vs live data; `e2e_worker.sh` still 20/20. **REMAINING:** team creates channel incoming-webhook (30 s) → `wrangler secret put REMINDER_WEBHOOK_URL` → enable. 1:1 Flow-bot = v2 (tenant-dependent) |
 | 10 | Tenant tests + distribution | ⬜ LAST | sideload zip (Essam 1 min), SSO user-consent check, colleague end-to-end run |
 
 ### Dev environment facts
@@ -242,8 +242,18 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 18. **PATCH also returns 204, no body** — success. Python `call_h` hardcodes `200` for any 2xx (urllib), so `st == 200` checks pass; the JS Worker port must map `resp.ok → 200` explicitly or every PATCH looks like a write failure.
 19. **On-call swap pre-delete filter is double-encoded (silent no-op)** — `api_core.py:344` pre-quotes the filter with `safe="'"` and the outer `quote()` re-encodes `%` → the lookup GET fails silently; the existing otheremp row is NOT deleted, only the new row is written. Low impact (rotation overwrite handles most cases) — TODO: build that filter without pre-quoting (outer quote already covers it).
 20. **Identity in the Worker is decode-only (v1)** — Bearer JWT payload is base64-decoded for `email`/`preferred_username` without signature verification. Hardening (step 8b): RS256 verify via tenant JWKS + `iss`/`aud`/`exp` checks.
+21. **PP environment-scoped API: `powerautomate` namespace ≠ `powerapps` scopes** — a valid `api.powerplatform.com` MSAL token (from the make.powerapps.com portal) gets 200 on `powerapps/apps/*` but **401** on `powerautomate/flows` (supported versions: 2024-10-01, 2026-05-01-preview, …). The portal's client app (a8f7a65c) has no cloud-flow scopes in its `.default` set; no flow token in the MSAL cache; mgmt-provider path 404s. ⇒ cloud flows can't be created headless from the portal session; use Worker cron instead (chosen) or admin/interactive path.
+22. **`node --check` on `worker/index.js` always fails (false alarm)** — no `type:module` in package.json, Node 26 checks it as CJS and chokes on `export`. Check via a `.mjs` copy: `cp worker/index.js /scratch/wchk.mjs && node --check wchk.mjs`. Same trap as the app.js browser-ESM note (§8.17-era).
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-07 (identity + reminders day)
+- **Identity layer complete + tested:** MSAL SSO (Teams tab) + PKCE fallback + two-mode auth screen (login / link-your-email) in `app.js` + `index.html`; Worker `identityFor()` split 401 (no token) vs 403+email (unlinked). **`test_identity.mjs` 5/5 PASS vs live Dataverse** (crafted alg:none JWTs are acceptable in v1 — decode-only per §8.20; RS256 hardening = step 8b). Test secrets deleted after run.
+- **Manifest v2:** added `validDomains` + `devicePermissions:["geolocation"]`; `webApplicationInfo.id/resource` waits for the new Entra client_id. Zip rebuilt (manifest validated as JSON first).
+- **PP JWT refreshed** from the persistent sp-profile headless Chrome (MSAL localStorage `api.powerplatform.com/.default` token; old one expired at 13:25). Verified 200 on `powerapps/apps`.
+- **Flow-API route to reminders CLOSED (§8.21):** `powerautomate/flows` 401s (scope), no cached flow token, mgmt path 404.
+- **Reminders v1 built + verified:** Worker cron `*/5` + pure `reminderPlan()` (AST math, lead/interval/stop-after, latest-direction, vacation exclusion) + channel-webhook @email delivery + dev dry-run endpoint. **`test_reminders.mjs` 10/10 PASS; live dry-run at 07:00-AST-Sunday returned the correct unsigned-person list vs real data; `e2e_worker.sh` re-run 20/20 after the patch; test rows wiped.**
+- NEXT: CF account (Essam) → live deploy + E2E vs live URL → Entra user-facing registration (Essam, settings prepared) → client_id into app.js + manifest → sideload test → webhook URL (team) → reminders live.
 
 ### 2026-10-07 (Worker port day)
 - **Local git repo initialized** in project dir (identity the0caesar@users.noreply.github.com to match GitHub); `deploy/web/` excluded (own repo).

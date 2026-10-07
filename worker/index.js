@@ -587,12 +587,127 @@ async function identityFor(req, env) {
   return { ident: await identityByEmail(env, email), hadToken: true, email };
 }
 
+// ---------- reminders (cron -> channel webhook @mention; SPEC §5.7 v1) ----------
+// 1:1 Flow-bot delivery = v2 (needs a flow/bot the tenant must allow).
+// Times are AST (UTC+3). Cron runs every 5 min (UTC); due-check uses minute math.
+// Settings: shift_start, shift_end (HH:MM AST), reminder_lead_minutes (30),
+//           reminder_interval_minutes (10), reminder_stop_after_minutes (60).
+const AST_OFFSET_MIN = 180; // UTC+3
+
+function hhmmToMin(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+
+/**
+ * Pure plan function (unit-testable, no I/O).
+ * nowUTC: Date. settings: {shift_start, shift_end, reminder_lead_minutes, ...}.
+ * roster: [{employee, name, email, is_approver}].
+ * signinsToday: [{employee, direction}] — direction 'in'|'out', latest per emp = current state.
+ * absentEmps: Set of employee numbers with an approved absence-type request today.
+ * Returns [{employee, name, email, kind: 'in'|'out'}].
+ */
+export function reminderPlan(nowUTC, settings, roster, signinsToday, absentEmps) {
+  const startMin = hhmmToMin(settings.shift_start);
+  const endMin = hhmmToMin(settings.shift_end);
+  const lead = parseInt(settings.reminder_lead_minutes ?? 30, 10);
+  const interval = parseInt(settings.reminder_interval_minutes ?? 10, 10);
+  const stopAfter = parseInt(settings.reminder_stop_after_minutes ?? 60, 10);
+  if (startMin == null || endMin == null) return [];
+
+  const ast = new Date(nowUTC.getTime() + AST_OFFSET_MIN * 60000);
+  const nowMin = ast.getUTCHours() * 60 + ast.getUTCMinutes();
+
+  const state = {}; // emp -> 'in' | 'out'
+  // signinsToday is newest-first; iterate oldest->newest so the LATEST wins
+  for (let i = signinsToday.length - 1; i >= 0; i--) state[signinsToday[i].employee] = signinsToday[i].direction;
+  const abs = absentEmps || new Set();
+
+  const due = (phaseMin) =>
+    nowMin >= phaseMin && nowMin <= phaseMin + stopAfter &&
+    (nowMin - phaseMin) % interval === 0;
+
+  const out = [];
+  for (const p of roster) {
+    if (abs.has(p.employee)) continue;
+    const winIn = startMin - lead;   // first sign-in reminder
+    const winOut = endMin - lead;    // first sign-out reminder
+    if (state[p.employee] !== "out" && due(winIn) && state[p.employee] !== "in") {
+      out.push({ employee: p.employee, name: p.name, email: p.email, kind: "in" });
+    }
+    if (state[p.employee] === "in" && due(winOut)) {
+      out.push({ employee: p.employee, name: p.name, email: p.email, kind: "out" });
+    }
+  }
+  return out;
+}
+
+async function scheduled(event, env) {
+  if (!env.REMINDER_WEBHOOK_URL) { console.log("reminders: no webhook configured, skip"); return; }
+  const dv = { DV_ORG_URL: env.DV_ORG_URL, DV_TENANT_ID: env.DV_TENANT_ID, DV_CLIENT_ID: env.DV_CLIENT_ID, DV_CLIENT_SECRET: env.DV_CLIENT_SECRET };
+  const [sr, rr, qr, ar] = await Promise.all([
+    call(dv, "GET", "new_settingses"),
+    call(dv, "GET", "new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail"),
+    call(dv, "GET", "new_signins?$select=new_signin_employeenumber,new_signin_datetime,new_signin_direction&$orderby=new_signin_datetime desc&$top=500"),
+    call(dv, "GET", "new_requestses?$select=new_requests_employeenumber,new_requests_type,new_requests_status,new_requests_date"),
+  ]);
+  const settings = {};
+  for (const row of (sr.status === 200 && isObj(sr.body)) ? (sr.body.value || []) : []) {
+    settings[row.new_name] = row.new_value_str || row.new_value;
+  }
+  const roster = ((rr.status === 200 && isObj(rr.body)) ? (rr.body.value || []) : [])
+    .map((x) => ({ employee: x.new_employeenumber, name: x.new_fullname, email: x.new_primaryemail }));
+  const todayAST = new Date(Date.now() + AST_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+  const signinsToday = ((qr.status === 200 && isObj(qr.body)) ? (qr.body.value || []) : [])
+    .filter((x) => (x.new_signin_datetime || "").slice(0, 10) === todayAST)
+    .map((x) => ({ employee: x.new_signin_employeenumber, direction: x.new_signin_direction === DIR_IN ? "in" : "out" }));
+  const absentTypes = absenceTypes(settings);
+  const reqRows = ((ar.status === 200 && isObj(ar.body)) ? (ar.body.value || []) : []);
+  const absentEmps = new Set(reqRows.filter((x) =>
+    x.new_requests_status === ST_APPROVED &&
+    absentTypes.includes(x.new_requests_type) &&
+    d10(x.new_requests_date) <= todayAST &&
+    (d10(x.new_requests_date2) || d10(x.new_requests_date)) >= todayAST
+  ).map((x) => String(x.new_requests_employeenumber)));
+
+  const plan = reminderPlan(new Date(), settings, roster, signinsToday, absentEmps);
+  if (!plan.length) { console.log("reminders: nothing due"); return; }
+  await Promise.all(plan.map(async (p) => {
+    const msg = p.kind === "in"
+      ? `@${p.email} sign-in reminder: you have not signed in yet (shift start ${settings.shift_start || "?"}, AST).`
+      : `@${p.email} sign-out reminder: you are still signed in (shift end ${settings.shift_end || "?"}, AST).`;
+    const r = await fetch(env.REMINDER_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: msg }),
+    });
+    console.log(`reminder ${p.kind} -> ${p.employee}: ${r.status}`);
+  }));
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const cors = corsHeaders(env, req);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (url.pathname === "/health") return json({ ok: true, at: nowZ() }, 200, cors);
+    if (url.pathname === "/api/reminders/plan" && env.DEV_EMPLOYEE_NUMBER) {
+      // dev dry-run: compute the plan with `?now=2026-10-08T04:05:00Z` (UTC), never sends
+      const [sr, rr, qr, ar] = await Promise.all([
+        call(env, "GET", "new_settingses"),
+        call(env, "GET", "new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail"),
+        call(env, "GET", "new_signins?$select=new_signin_employeenumber,new_signin_datetime,new_signin_direction&$orderby=new_signin_datetime desc&$top=500"),
+        call(env, "GET", "new_requestses?$select=new_requests_employeenumber,new_requests_type,new_requests_status,new_requests_date"),
+      ]);
+      const settings = {};
+      for (const row of (sr.status === 200 && isObj(sr.body)) ? (sr.body.value || []) : []) settings[row.new_name] = row.new_value_str || row.new_value;
+      const roster = ((rr.status === 200 && isObj(rr.body)) ? (rr.body.value || []) : []).map((x) => ({ employee: x.new_employeenumber, name: x.new_fullname, email: x.new_primaryemail }));
+      const todayAST = new Date(Date.now() + AST_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+      const signinsToday = ((qr.status === 200 && isObj(qr.body)) ? (qr.body.value || []) : []).filter((x) => (x.new_signin_datetime || "").slice(0, 10) === todayAST).map((x) => ({ employee: x.new_signin_employeenumber, direction: x.new_signin_direction === DIR_IN ? "in" : "out" }));
+      const absentEmps = new Set(((ar.status === 200 && isObj(ar.body)) ? (ar.body.value || []) : []).filter((x) => x.new_requests_status === ST_APPROVED && absenceTypes(settings).includes(x.new_requests_type) && d10(x.new_requests_date) <= todayAST && (d10(x.new_requests_date2) || d10(x.new_requests_date)) >= todayAST).map((x) => String(x.new_requests_employeenumber)));
+      const now = url.searchParams.get("now") ? new Date(url.searchParams.get("now")) : new Date();
+      return json({ now: now.toISOString(), due: reminderPlan(now, settings, roster, signinsToday, absentEmps) }, 200, cors);
+    }
     if (!url.pathname.startsWith("/api/")) return json({ error: "not found: " + url.pathname }, 404, cors);
 
     const q = {};
