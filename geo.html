@@ -58,9 +58,13 @@
   const radiusEl = document.getElementById("radius");
   const sendEl = document.getElementById("send");
 
-  const map = L.map("map").setView(MKH, 13);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+  const map = L.map("map").setView(MKH, 14);
+  const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" });
+  const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 19, attribution: "© OpenStreetMap contributors" });
+  L.control.layers({ "Satellite": sat, "Streets": streets }, null, { position: "topright" }).addTo(map);
+  sat.addTo(map);
 
   let marker = null, circle = null, pos = null;
 

@@ -95,8 +95,13 @@ function openMapPicker() {
   $("#mp-coord").textContent = "";
   const st = $("#mp-status"); st.textContent = "Click the map — or drag the pin — to the exact spot."; st.className = "hint";
   if (!mpMap) {
-    mpMap = L.map("mp-map").setView([24.4686, 39.6142], 13); // Makkah
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(mpMap);
+    mpMap = L.map("mp-map").setView([24.4686, 39.6142], 14); // Makkah
+    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" });
+    const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "© OpenStreetMap contributors" });
+    L.control.layers({ "Satellite": sat, "Streets": streets }, null, { position: "topright" }).addTo(mpMap);
+    sat.addTo(mpMap);
     mpMap.on("click", e => mpPlace(e.latlng.lat, e.latlng.lng, null));
   }
   mpMap.invalidateSize();
