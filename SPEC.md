@@ -295,6 +295,12 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (roster: 4 missing members added)
+- **Trigger (Essam):** friend got the "almost there / contact admin" screen — he was in the env but not in the roster.
+- **Findings:** app is by design roster-only (22 in `new_employeeses`). Live diff of env `systemusers` (sec.se.com.sa domain, 26 users) vs app roster → **4 missing**: 68589 Nabeel Khan, 78481 Mustafa Basha, 80686 FAHAD AL-NUFAEE, 96941 AHMED ALHARBI.
+- **Fix:** Essam said "add all 4" → POSTed all 4 to `new_employeeses` (first attempt 400: `new_email` is REQUIRED, not just `new_primaryemail`). All 204, read-back verified. Roster now = 26 = env. No deploy needed (roster read live at sign-in).
+- **Lesson:** roster create requires `new_email` (required field) + `new_primaryemail` + `new_employeenumber` + `new_fullname`.
+
 ### 2026-10-08 (map picker: pin-lingers / won't-save fix)
 - **Ask (Essam):** "clicked on the map, it added a pin, I didn't name or save it, pin lingered, I tried to name it and save, it didn't save."
 - **Root cause:** in the all-sites map a bare map click made a pin but the button stayed "— select a site —" and the click went down the wrong path (form-fill for *new* sites — which only fills the form, doesn't save). Plus stale pins persisted between opens.
