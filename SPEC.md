@@ -295,6 +295,12 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (bugfixes: log delete + rejected requests on grid)
+- **Report (Essam):** "I can't delete logs. Rejected requests still show in calendar."
+- **Root cause 1 (delete):** the delete button used native `window.confirm()` — **suppressed inside the Teams iframe** (dialog never shows, returns false → handler silently no-ops). The API path was proven good live (worker→Dataverse DELETE works; fake-GUID probe returned Dataverse 404, real delete round-trip OK). **Fix:** two-step in-page confirm — click Delete → button turns "Confirm?" for 3.5 s → second click deletes. No native dialogs anywhere.
+- **Root cause 2 (rejected on grid):** `requestsFor()` only excluded cancelled, so rejected requests rendered as grid chips (week/month/year cells, status filter, detail popup). **Fix:** exclude cancelled AND rejected — grid shows pending + approved only. Requests/Approvals tabs unaffected (they read `S.requests` directly, so rejected still visible where it belongs).
+- **Deploy:** frontend-only, cache-bust `?v=20261008b`, no worker change, no zip. Verified live: `/app/` serves 20261008b, both code markers present in live app.js.
+
 ### 2026-10-08 (icon v2: bigger shield, Arial Black — v1.0.8)
 - **Ask (Essam):** "make the shield a little bit bigger and make it look nicer and use a different font. I don't like this font. It looks childish."
 - **Done:** `teams/make_icons_shield_v2.py` (Pillow, Hermes venv python — Pillow already in venv, no install). 4× supersampled LANCZOS. Shield 72% of tile, sharp crest corners, tight deliberate drop shadow, light 3px edge, Arial Black PMK at 90% shield width (navy on blue gradient). Two vision-critique rounds: 4/10 → 7/10 → "ship, comfortable margins, no unprofessional flaw".

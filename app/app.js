@@ -316,7 +316,7 @@ function requestsFor(emp, date) {
     r.employee === emp &&
     r.date <= date &&
     (r.date2 || r.date) >= date &&
-    r.status !== 100000004); // not cancelled
+    r.status !== 100000004 && r.status !== 100000003); // cancelled & rejected: not active, hidden from grid
 }
 const ST = { requested: 100000001, approved: 100000002, rejected: 100000003, cancelled: 100000004 };
 const stName = v => (["", "requested", "approved", "rejected", "cancelled"][v / 100000000 - 99999999] || String(v));
@@ -901,10 +901,21 @@ function renderAdminLogs() {
       return;
     }
     if (act === "del") {
-      const who = person(s.employee);
-      if (!confirm(`Delete log entry for ${who ? who.name : s.employee} (${s.direction}, ${fmtTime(s.at)})? This cannot be undone.`)) return;
-      try { await api("/api/admin/signins/delete", { method: "POST", body: { id: s.id } }); toast("Deleted"); await refresh(); renderAdminLogs(); }
-      catch (e) { toast(e.message, "err"); }
+      // Two-step in-page confirm: native confirm() is suppressed inside the
+      // Teams iframe (dialog never shows, handler silently no-ops).
+      if (btn.dataset.arm) {
+        delete btn.dataset.arm;
+        const id = s.id;
+        try { await api("/api/admin/signins/delete", { method: "POST", body: { id } }); toast("Deleted"); await refresh(); renderAdminLogs(); }
+        catch (e) { toast(e.message, "err"); }
+        return;
+      }
+      btn.dataset.arm = "1";
+      const old = btn.textContent;
+      btn.textContent = "Confirm?";
+      btn.title = "Click again to delete — cannot be undone";
+      setTimeout(() => { delete btn.dataset.arm; btn.textContent = old; btn.title = ""; }, 3500);
+      return;
     }
   }));
 }
