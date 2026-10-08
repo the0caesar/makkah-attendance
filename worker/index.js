@@ -775,8 +775,13 @@ export default {
     // Teams tab always gets the latest build WITHOUT a new app install. HTML: no-cache
     // (always revalidate); assets: short cache (the index.html cache-bust ?v= on
     // app.js handles the rest). Content origin = the live Pages site.
-    if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
-      const name = url.pathname === "/app" ? "" : url.pathname.slice(5);
+    if (url.pathname === "/app") {
+      // contentUrl has no trailing slash — redirect so relative asset refs
+      // (style.css, app.js, …) resolve under /app/ instead of /.
+      return new Response(null, { status: 301, headers: { Location: "/app/", ...cors } });
+    }
+    if (url.pathname.startsWith("/app/")) {
+      const name = url.pathname.slice(5);
       const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true };
       if (!ALLOWED[name]) return json({ error: "not found" }, 404, cors);
       const f = await fetch(`https://the0caesar.github.io/makkah-attendance/${name}`, { cf: { cacheTtl: 0 } });

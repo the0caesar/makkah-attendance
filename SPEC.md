@@ -301,6 +301,7 @@ A shift (per Essam) has at least:
 - **Manifest v1.0.6 (LAST zip):** contentUrl → `https://makkah-attendance-api.makkah-attendance-api.workers.dev/app`; `webApplicationInfo.resource` + `validDomains` → workers.dev origin (SSO resource must match iframe origin). Worker `/app` route: allow-listed files only (`index.html/app.js/style.css/teams.js/msal-browser.min.js`), 404 otherwise.
 - **Standing rule (delivery):** **no more zips.** Frontend deploy = push Pages + done (tab picks it up on next open). Zips only if the delivery mechanism itself changes or SSO resource needs updating.
 - **Verified live:** `/app` → 200 + `no-cache` + current build (viewtoggle present); `/app/app.js` streams full file; `/health` OK.
+- **Bug + fix (same day):** contentUrl `.../app` (no trailing slash) made the browser resolve asset refs to `/app.js` instead of `/app/app.js` → frozen loading screen for Essam. Fix: Worker 301-redirects `/app` → `/app/`. No zip needed — first real proof of the auto-refresh delivery (fix reached the installed app on tab refresh).
 - **Note:** PKCE fallback (non-Teams browser login) may need the workers.dev origin added to the app registration's redirect URIs — Teams SSO (the normal path) is unaffected. Check only if someone opens the page outside Teams.
 
 ### 2026-10-08 (grid: week/month/year views + filter/sort toolbar)
