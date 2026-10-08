@@ -87,6 +87,55 @@ function getLocation(ms = 15000) {
   });
 }
 
+// ---------- map picker (in-app Leaflet overlay; no separate page, no second sign-in) ----------
+let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null;
+function openMapPicker() {
+  if (!window.L) { toast("Map couldn't load inside the app — use 🌐 Open in browser instead.", "err"); return; }
+  $("#map-picker").style.display = "block";
+  $("#mp-coord").textContent = "";
+  const st = $("#mp-status"); st.textContent = "Click the map — or drag the pin — to the exact spot."; st.className = "hint";
+  if (!mpMap) {
+    mpMap = L.map("mp-map").setView([24.4686, 39.6142], 13); // Makkah
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(mpMap);
+    mpMap.on("click", e => mpPlace(e.latlng.lat, e.latlng.lng, null));
+  }
+  mpMap.invalidateSize();
+  // try GPS briefly (mobile works; Teams desktop hangs -> stays on Makkah, user clicks)
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      p => mpPlace(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+      () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 });
+  }
+}
+function mpPlace(lat, lon, acc) {
+  mpPos = { lat, lon };
+  if (!mpMarker) {
+    mpMarker = L.marker([lat, lon], { draggable: true }).addTo(mpMap);
+    mpMarker.on("dragend", () => { const p = mpMarker.getLatLng(); mpPos = { lat: p.lat, lon: p.lng }; mpUpdate(); });
+  } else mpMarker.setLatLng([lat, lon]);
+  mpMap.panTo([lat, lon], { zoom: Math.max(mpMap.getZoom(), 16), animate: true });
+  mpUpdate();
+  if (acc != null) { const st = $("#mp-status"); st.textContent = "Accuracy ±" + Math.round(acc) + " m — drag the pin to fine-tune."; st.className = "hint"; }
+}
+function mpUpdate() {
+  if (!mpPos) return;
+  $("#mp-coord").textContent = mpPos.lat.toFixed(6) + ", " + mpPos.lon.toFixed(6);
+  const r = parseInt($("#mp-radius").value, 10) || 200;
+  if (mpCircle) mpCircle.setLatLng([mpPos.lat, mpPos.lon]).setRadius(r);
+  else mpCircle = L.circle([mpPos.lat, mpPos.lon], { radius: r, color: "#4cc2ff", weight: 2, fillOpacity: 0.12 }).addTo(mpMap);
+}
+function useMapLocation() {
+  if (!mpPos) { toast("Pick a spot on the map first", "err"); return; }
+  $("#sf-lat").value = mpPos.lat.toFixed(6);
+  $("#sf-lon").value = mpPos.lon.toFixed(6);
+  const nm = $("#mp-name").value, rd = $("#mp-radius").value;
+  if (nm) $("#sf-name").value = nm;
+  if (rd) $("#sf-radius").value = rd;
+  $("#map-picker").style.display = "none";
+  toast("Location set — press Add site");
+}
+function cancelMapPicker() { $("#map-picker").style.display = "none"; }
+
 // ---------- identity (Teams SSO → PKCE fallback; see SPEC.md §3) ----------
 let AUTH_ERR = null; // last sign-in failure reason, shown on the auth screen
 function getMsal() {
@@ -750,8 +799,9 @@ function renderAdminSites() {
     <label>Latitude <input id="sf-lat" type="number" step="any" required></label>
     <label>Longitude <input id="sf-lon" type="number" step="any" required></label>
     <label>Radius (m) <input id="sf-radius" type="number" value="200" required></label>
+    <button class="btn ghost" type="button" id="sf-geo-map">🗺️ Pick on map</button>
     <button class="btn ghost" type="button" id="sf-geo">📍 My location</button>
-    <a class="btn ghost" id="sf-geo-browser" href="https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/geo.html" target="_blank" title="Teams desktop can't read GPS — this opens a helper page in your browser that grabs your location and sends it back">🌐 Get location from browser</a>
+    <a class="btn ghost" id="sf-geo-browser" href="https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/geo.html" target="_blank" title="Fallback: opens the map picker in your browser">🌐 Open in browser</a>
     <button class="btn primary" type="submit">Add site</button>
   </form>
   <table><tr><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th></tr>
@@ -763,6 +813,10 @@ function renderAdminSites() {
     <td><a href="https://maps.google.com/?q=${s.lat},${s.lon}" target="_blank">map</a></td>
   </tr>`).join("") || '<tr><td colspan="6">No sites yet — add one above (📍 fills your current location).</td></tr>'}
   </table>`;
+  $("#sf-geo-map").addEventListener("click", openMapPicker);
+  $("#mp-use").addEventListener("click", useMapLocation);
+  $("#mp-cancel").addEventListener("click", cancelMapPicker);
+  $("#mp-radius").addEventListener("input", mpUpdate);
   $("#sf-geo").addEventListener("click", async () => {
     try {
       const g = await getLocation(6000); // short timeout: Teams desktop hangs (no GPS there)
