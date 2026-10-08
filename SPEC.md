@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (roster: 63021 Ahmad H. Batawi, admin)
+- **Ask (Essam):** "63021 can you add this as admin only?" → data: Ahmad H. Batawi, 63021@sec.se.com.sa (env acct), AhBatawi@ngrid.sa (Teams sign-in acct — same pattern as Essam's row).
+- **Done:** POSTed roster row: number 63021, `new_email`=63021@SEC.se.com.sa, `new_primaryemail`=AhBatawi@ngrid.sa, **admin=100000002**. 204 + read-back. Both sign-in paths resolve: 63021@... → number-match; AhBatawi@ngrid.sa → email-match. Roster now 27, admins now 5.
+- **Open (unanswered):** "admin only" — if he must NOT appear as a regular member (grid/sign-in), that needs an app change; he currently is member+admin.
+
 ### 2026-10-08 (admins: Nabeel, Emad, Rami)
 - **Ask (Essam):** "nabeel, emad, rami, are admins."
 - **Done:** PATCHed `new_employees_isapprover = 100000002` (APPR_YES) on 68589 Nabeel Khan, 82894 Emad AL Zahrani, 88314 Rami Ashour. Read-back: exactly 4 admins (70180 Essam + the 3). They see the Admin tab on next sign-in — no deploy needed.
