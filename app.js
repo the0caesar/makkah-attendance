@@ -816,8 +816,23 @@ function renderAdminSites() {
     <td><input class="si-radius" data-id="${s.id}" value="${s.radius}" type="number" style="width:80px"></td>
     <td><span class="switch ${s.enabled ? "on" : ""}" data-id="${s.id}" data-on="${s.enabled}"></span></td>
     <td><a href="https://maps.google.com/?q=${s.lat},${s.lon}" target="_blank">map</a></td>
-  </tr>`).join("") || '<tr><td colspan="6">No sites yet — add one above (📍 fills your current location).</td></tr>'}
+    <td><button class="btn danger sm" data-site-del="${s.id}">Delete</button></td>
+  </tr>`).join("") || '<tr><td colspan="7">No sites yet — add one above (📍 fills your current location).</td></tr>'}
   </table>`;
+  $$("#tab-sites [data-site-del]").forEach(b => b.addEventListener("click", async () => {
+    // two-step (native confirm() is suppressed in the Teams iframe)
+    if (b.dataset.arm) {
+      delete b.dataset.arm;
+      try { await api(`/api/admin/sites/${b.dataset.siteDel}`, { method: "DELETE" }); toast("Site deleted"); await refresh(); }
+      catch (e) { toast(e.message, "err"); }
+      return;
+    }
+    b.dataset.arm = "1";
+    const old = b.textContent;
+    b.textContent = "Confirm?";
+    b.title = "Click again to delete this site — people will stop signing in here";
+    setTimeout(() => { delete b.dataset.arm; b.textContent = old; b.title = ""; }, 3500);
+  }));
   $("#sf-geo-map").addEventListener("click", openMapPicker);
   $("#mp-use").addEventListener("click", useMapLocation);
   $("#mp-cancel").addEventListener("click", cancelMapPicker);
