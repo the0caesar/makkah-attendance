@@ -823,7 +823,7 @@ function renderAdminSites() {
     // two-step (native confirm() is suppressed in the Teams iframe)
     if (b.dataset.arm) {
       delete b.dataset.arm;
-      try { await api(`/api/admin/sites/${b.dataset.siteDel}`, { method: "DELETE" }); toast("Site deleted"); await refresh(); }
+      try { await api(`/api/admin/sites/${b.dataset.siteDel}`, { method: "DELETE" }); toast("Site deleted"); await loadBase(); renderAdmin(); }
       catch (e) { toast(e.message, "err"); }
       return;
     }
