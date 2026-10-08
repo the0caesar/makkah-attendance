@@ -295,6 +295,10 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (admins: Nabeel, Emad, Rami)
+- **Ask (Essam):** "nabeel, emad, rami, are admins."
+- **Done:** PATCHed `new_employees_isapprover = 100000002` (APPR_YES) on 68589 Nabeel Khan, 82894 Emad AL Zahrani, 88314 Rami Ashour. Read-back: exactly 4 admins (70180 Essam + the 3). They see the Admin tab on next sign-in — no deploy needed.
+
 ### 2026-10-08 (roster: 4 missing members added)
 - **Trigger (Essam):** friend got the "almost there / contact admin" screen — he was in the env but not in the roster.
 - **Findings:** app is by design roster-only (22 in `new_employeeses`). Live diff of env `systemusers` (sec.se.com.sa domain, 26 users) vs app roster → **4 missing**: 68589 Nabeel Khan, 78481 Mustafa Basha, 80686 FAHAD AL-NUFAEE, 96941 AHMED ALHARBI.
