@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Location Helper — Protection Portal</title>
+<style>
+  :root { --bg:#0d1630; --card:#15234a; --accent:#4cc2ff; --text:#e8eefc; --muted:#9fb0d8; --ok:#3ddc84; --err:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--text);
+         font-family:"Segoe UI",system-ui,-apple-system,sans-serif; padding:24px; }
+  .card { background:var(--card); border:1px solid #24407c; border-radius:14px; padding:28px 32px;
+          max-width:520px; width:100%; text-align:center; }
+  h1 { font-size:20px; margin:0 0 8px; }
+  p.sub { color:var(--muted); font-size:13.5px; margin:0 0 18px; line-height:1.5; }
+  #status { font-size:15px; padding:18px 0; color:var(--muted); }
+  #status.err { color:var(--err); }
+  .big { font-size:30px; font-weight:700; letter-spacing:.5px; color:var(--accent); margin:14px 0 4px; word-break:break-all; }
+  #acc { color:var(--muted); font-size:13px; margin-bottom:18px; }
+  .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  button, a.btn { font:inherit; font-size:14px; padding:10px 18px; border-radius:8px; cursor:pointer;
+                  border:1px solid #24407c; background:#1b2a54; color:var(--text); text-decoration:none;
+                  display:inline-block; }
+  a.primary { background:var(--accent); border-color:var(--accent); color:#06122b; font-weight:700; }
+  button:active, a:active { transform:translateY(1px); }
+  .hint { margin-top:16px; font-size:12.5px; color:var(--muted); line-height:1.5; }
+  code { background:#0a1226; padding:2px 6px; border-radius:5px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📍 Location Helper</h1>
+  <p class="sub">For <b>Protection Portal</b> — Teams can't read GPS on desktop, so this page grabs your
+  location here in the browser and hands it back to the app.</p>
+
+  <div id="status">Getting your location…</div>
+
+  <div id="result" hidden>
+    <div class="big" id="big"></div>
+    <div id="acc"></div>
+    <div class="row">
+      <button id="copy">Copy coordinates</button>
+      <a id="open" class="btn primary" href="#">Open Protection Portal →</a>
+    </div>
+    <div class="hint">The app opens with these coordinates pre-filled in <b>Admin → Sites</b>.<br>
+      Just add a name and radius, then press <b>Add site</b>.</div>
+  </div>
+</div>
+<script>
+  const APP = "https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/?site=";
+  const status = document.getElementById("status");
+  function done(p) {
+    const lat = p.coords.latitude.toFixed(6), lon = p.coords.longitude.toFixed(6);
+    status.hidden = true;
+    document.getElementById("result").hidden = false;
+    document.getElementById("big").textContent = lat + ", " + lon;
+    document.getElementById("acc").textContent = "Accuracy ±" + Math.round(p.coords.accuracy) + " m";
+    document.getElementById("open").href = APP + lat + "," + lon;
+  }
+  function fail(e) {
+    status.textContent = {1:"Location permission denied — allow location for this site in your browser, then reload.",
+                          2:"Position unavailable (GPS off / no fix?)", 3:"Timed out — press the reload button."}[e.code] || "Location error.";
+    status.className = "err";
+    status.innerHTML += ' <button id="retry" style="margin-left:8px">Retry</button>';
+    const r = document.getElementById("retry");
+    if (r) r.onclick = () => location.reload();
+  }
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(done, fail, { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
+  } else { fail({ code: 2 }); }
+  document.getElementById("copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById("big").textContent);
+      const b = document.getElementById("copy"); b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy coordinates", 1600);
+    } catch (e) { }
+  });
+</script>
+</body>
+</html>

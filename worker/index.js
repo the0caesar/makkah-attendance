@@ -782,11 +782,11 @@ export default {
     }
     if (url.pathname.startsWith("/app/")) {
       const name = url.pathname.slice(5);
-      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true };
+      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true, "geo.html": true };
       if (!ALLOWED[name]) return json({ error: "not found" }, 404, cors);
       const f = await fetch(`https://the0caesar.github.io/makkah-attendance/${name}`, { cf: { cacheTtl: 0 } });
       const h = new Headers(f.headers);
-      h.set("Cache-Control", name === "" || name === "index.html"
+      h.set("Cache-Control", name === "" || name === "index.html" || name === "geo.html"
         ? "no-cache, must-revalidate"
         : "public, max-age=600");
       return new Response(f.body, { status: f.status, headers: h });

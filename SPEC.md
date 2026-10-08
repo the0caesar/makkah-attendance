@@ -295,6 +295,13 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (location helper — Teams desktop has no GPS)
+- **Report (Essam):** adding a site — "📍 My location" times out (desktop, browser location allowed).
+- **Root cause:** the Teams **desktop** webview does not expose geolocation to tab content — `getCurrentPosition` hangs until timeout. Mobile Teams works (that's how phone sign-in gets GPS).
+- **Fix (frontend + worker, no zip):** new helper page **`app/geo.html`** (served by Worker `/app/geo.html`, no-cache) — runs in the external **browser** where GPS works: grabs location, shows coords + accuracy, copy button, and **"Open Protection Portal →"** link → `/app/?site=lat,lon`. App boot hook: `?site=lat,lon` (admins only) jumps to **Admin → Sites** and prefills lat/lon — just add name + radius → Add site. Site form: new **"🌐 Get location from browser"** button (opens helper); original 📍 now 6 s timeout (works on mobile) with a guiding toast on failure. Worker `/app` allow-list: `geo.html` (no-cache HTML class).
+- **Deploy:** cache-bust `?v=20261008c`. Verified live: geo.html 200 no-cache, index serves 20261008c, both markers present, health OK.
+- **Known limitation (documented):** sign-in/out GPS on **desktop** Teams still can't read GPS (core feature) — sign in from the phone. Browser-helper sign-in (geo.html-style flow submitting a sign-in) is a possible future add if Essam wants it.
+
 ### 2026-10-08 (bugfixes: log delete + rejected requests on grid)
 - **Report (Essam):** "I can't delete logs. Rejected requests still show in calendar."
 - **Root cause 1 (delete):** the delete button used native `window.confirm()` — **suppressed inside the Teams iframe** (dialog never shows, returns false → handler silently no-ops). The API path was proven good live (worker→Dataverse DELETE works; fake-GUID probe returned Dataverse 404, real delete round-trip OK). **Fix:** two-step in-page confirm — click Delete → button turns "Confirm?" for 3.5 s → second click deletes. No native dialogs anywhere.
