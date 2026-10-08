@@ -480,8 +480,9 @@ const TYPE_CLASS = {
 };
 function typeClass(t) { return TYPE_CLASS[t] || "b-other"; }
 function visibleEmployees() {
-  if (String(S.settings.rls_enabled) !== "1") return S.roster;
-  return S.roster.filter(p => p.employee === S.me.employee_number || p.is_approver);
+  let rows = S.roster.filter(p => !p.admin_only); // admin-only staff: hidden from all team views
+  if (String(S.settings.rls_enabled) !== "1") return rows;
+  return rows.filter(p => p.employee === S.me.employee_number || p.is_approver);
 }
 function person(emp) { return S.roster.find(p => p.employee === emp); }
 function myLatestSignin() {
@@ -765,7 +766,7 @@ function renderShifts() {
   const weekLbl = `${a.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })} – ${b.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })}`;
   const days = weekDays(ws);
   const td = todayISO();
-  const opts = S.roster.map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(p.employee)})</option>`).join("");
+  const opts = S.roster.filter(p => !p.admin_only).map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(p.employee)})</option>`).join("");
   el.innerHTML = `
   <div class="card" style="margin-bottom:18px">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
@@ -1004,7 +1005,7 @@ function renderAdminSites() {
 function renderAdminOnCall() {
   const el = $("#tab-oncall");
   const days = weekDays(S.weekStart);
-  const opts = S.roster.map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(p.employee)})</option>`).join("");
+  const opts = S.roster.filter(p => !p.admin_only).map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(p.employee)})</option>`).join("");
   el.innerHTML = `
   <div class="inline-form">
     <label>Person <select id="oc-emp">${opts}</select></label>
@@ -1131,12 +1132,13 @@ function renderAdminLogs() {
 function renderAdminPeople() {
   const el = $("#tab-people");
   el.innerHTML = `
-  <div class="hint" style="margin-bottom:10px">Identity linking: set the person's <b>Teams (Entra) email</b> — the app matches it to the signed-in user. Toggle who can approve.</div>
-  <table><tr><th>Name</th><th>Number</th><th>Primary email</th><th>Teams email (link)</th><th>Approver</th></tr>
+  <div class="hint" style="margin-bottom:10px">Identity linking: set the person's <b>Teams (Entra) email</b> — the app matches it to the signed-in user. Toggle who can approve. <b>Admin only</b> = keeps admin access but is hidden from all team views (managed in the worker's ADMIN_ONLY_NUMBERS).</div>
+  <table><tr><th>Name</th><th>Number</th><th>Primary email</th><th>Teams email (link)</th><th>Approver</th><th>Team</th></tr>
   ${S.roster.map(p => `<tr>
     <td><b>${esc(p.name)}</b></td><td>${esc(p.employee)}</td><td style="color:var(--muted);font-size:12px">${esc(p.email || "—")}</td>
     <td><input class="pe-mail" data-emp="${esc(p.employee)}" placeholder="email@company.sa" style="width:200px"></td>
     <td><span class="switch ${p.is_approver ? "on" : ""}" data-emp="${esc(p.employee)}" data-on="${p.is_approver}"></span></td>
+    <td>${p.admin_only ? '<span style="color:var(--muted);font-size:12px">— admin only —</span>' : "member"}</td>
   </tr>`).join("")}
   </table>`;
   el.querySelectorAll(".pe-mail").forEach(inp => inp.addEventListener("change", async () => {
