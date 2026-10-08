@@ -157,3 +157,30 @@ a:hover { text-decoration: underline; }
 }
 .toast.err { border-color: var(--red); color: var(--red); }
 .toast.ok { border-color: var(--green); color: var(--green); }
+
+/* grid views + toolbar (week / month / year) */
+.viewtoggle { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.viewtoggle button { background: var(--panel); border: 0; color: var(--muted); padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.viewtoggle button + button { border-left: 1px solid var(--border); }
+.viewtoggle button.active { background: var(--accent); color: #101010; font-weight: 700; }
+.grid-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.grid-toolbar input[type=search] { flex: 1; min-width: 170px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 6px 10px; font-size: 13px; }
+.grid-toolbar select, .grid-toolbar input[type=date] { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 6px 8px; font-size: 13px; }
+.gt-date { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.chip { display: inline-block; font-size: 9.5px; font-weight: 700; padding: 1px 4px; border-radius: 4px; margin: 1px; color: #101010; line-height: 1.5; }
+.chip.c-oncall { background: var(--purple); }
+.chip.c-vacation { background: var(--amber); }
+.chip.c-reset { background: var(--teal); }
+.chip.c-training { background: var(--accent); }
+.chip.c-overtime { background: var(--orange); }
+.chip.c-callout { background: #e0e0e0; }
+.chip.c-other { background: #8a8a8a; color: #f3f2f1; }
+.sdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 2px 1px 0; }
+.sdot.ok { background: var(--green); }
+.sdot.bad { background: var(--red); }
+.sdot.out { background: var(--muted); }
+table.grid.compact thead th { font-size: 10px; }
+table.grid.compact td { padding: 2px 3px; min-width: 34px; max-width: 48px; }
+table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
+table.grid th.wknd, table.grid td.wknd { background: rgba(255, 255, 255, 0.03); }
+table.grid.compact td.today-col { background: #19262e; }

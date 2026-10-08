@@ -75,6 +75,7 @@ function startOfWeek(d) { // Sunday
 function todayISO() { return isoDate(new Date()); }
 function weekDays(ws) { return [...Array(7)].map((_, i) => isoDate(addDays(ws, i))); }
 const DAYN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function getLocation() {
   return new Promise((res, rej) => {
@@ -288,6 +289,8 @@ const S = {
   me: null, roster: [], settings: {}, sites: [],
   weekStart: startOfWeek(new Date()),
   shiftWeekStart: startOfWeek(new Date()),
+  gridView: "week",
+  gt: { search: "", sort: "name-asc", date: todayISO(), status: "all" },
   oncall: [], requests: [], signins: [], training: [],
   screen: "today", adminTab: "sites",
 };
@@ -334,8 +337,18 @@ async function loadBase() {
   else b.style.display = "none";
 }
 async function refresh() {
-  const from = isoDate(addDays(S.weekStart, -1));
-  const to = isoDate(addDays(S.weekStart, 8));
+  // Data window adapts to the active grid view (week / month / year)
+  let from, to;
+  const ws = S.weekStart;
+  if (S.gridView === "year") {
+    from = `${ws.getFullYear()}-01-01`; to = `${ws.getFullYear()}-12-31`;
+  } else if (S.gridView === "month") {
+    const f = new Date(Date.UTC(ws.getFullYear(), ws.getMonth(), 1));
+    const l = new Date(Date.UTC(ws.getFullYear(), ws.getMonth() + 1, 0));
+    from = isoDate(addDays(f, -1)); to = isoDate(addDays(l, 1));
+  } else {
+    from = isoDate(addDays(ws, -1)); to = isoDate(addDays(ws, 8));
+  }
   const [oc, reqs, sig, tr] = await Promise.all([
     api(`/api/oncall?from=${from}&to=${to}`),
     api(`/api/requests?from=${from}&to=${to}`),
@@ -378,33 +391,148 @@ function renderToday() {
     siS.textContent = "○ Not signed in"; siS.className = "si-status out";
     siD.textContent = `Shift ${S.settings.shift_start || "07:30"}–${S.settings.shift_end || "15:30"} (AST)`;
   }
-  // week label
-  const a = S.weekStart, b = addDays(S.weekStart, 6);
-  $("#wk-label").textContent =
-    `${a.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })} – ${b.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })}`;
+  // view label
+  const ws = S.weekStart;
+  if (S.gridView === "year") $("#wk-label").textContent = String(ws.getFullYear());
+  else if (S.gridView === "month") $("#wk-label").textContent = ws.toLocaleDateString("en-GB", { timeZone: TZ, month: "long", year: "numeric" });
+  else {
+    const a = ws, b = addDays(ws, 6);
+    $("#wk-label").textContent =
+      `${a.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })} – ${b.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "short" })}`;
+  }
+  $$("#viewtoggle button").forEach(b => b.classList.toggle("active", b.dataset.view === S.gridView));
   // grid
-  const days = weekDays(S.weekStart);
   const td = todayISO();
+  const compact = S.gridView !== "week";
+  const cols = S.gridView === "year" ? yearCols(ws) : S.gridView === "month" ? monthCols(ws) : weekCols(ws);
   let html = "<thead><tr><th>Person</th>";
-  days.forEach((d, i) => {
-    const cls = d === td ? "today-col" : "";
-    html += `<th class="${cls}">${DAYN[i]}<br>${d.slice(5)}</th>`;
+  cols.forEach(c => {
+    const cls = [c.today ? "today-col" : "", c.wknd ? "wknd" : ""].filter(Boolean).join(" ");
+    html += `<th class="${cls}">${c.label}</th>`;
   });
   html += "</tr></thead><tbody>";
-  for (const p of visibleEmployees()) {
+  for (const p of gridRows()) {
     const me = p.employee === S.me.employee_number;
     html += `<tr class="${me ? "me" : ""}">`;
     html += `<td class="person">${esc(p.name)}${me ? " (me)" : ""}<span class="m">${esc(p.employee)}${p.is_approver ? " • admin" : ""}</span></td>`;
-    days.forEach(d => {
-      const isToday = d === td;
-      const cell = cellHTML(p.employee, d);
-      html += `<td class="${isToday ? "today-col" : ""}" data-emp="${esc(p.employee)}" data-date="${d}">${cell}</td>`;
+    cols.forEach(c => {
+      if (S.gridView === "year") {
+        const cell = cellYear(p.employee, ws.getFullYear(), c.m);
+        html += `<td class="compact ${c.today ? "today-col" : ""}" data-ym="${c.key}">${cell}</td>`;
+      } else {
+        const cls = [c.today ? "today-col" : "", c.wknd ? "wknd" : ""].filter(Boolean).join(" ");
+        const cell = S.gridView === "month" ? cellChips(p.employee, c.date) : cellHTML(p.employee, c.date);
+        html += `<td class="${compact ? "compact " : ""}${cls}" data-emp="${esc(p.employee)}" data-date="${c.date}">${cell}</td>`;
+      }
     });
     html += "</tr>";
   }
   html += "</tbody>";
-  $("#grid").innerHTML = html;
+  const g = $("#grid");
+  g.classList.toggle("compact", compact);
+  g.innerHTML = html;
   $$("#grid td[data-emp]").forEach(tdEl => tdEl.addEventListener("click", () => openDetail(tdEl.dataset.emp, tdEl.dataset.date)));
+  $$("#grid td[data-ym]").forEach(tdEl => tdEl.addEventListener("click", () => {
+    const [y, m] = tdEl.dataset.ym.split("-").map(Number);
+    S.gridView = "month";
+    S.weekStart = new Date(Date.UTC(y, m - 1, 15));
+    renderToday();
+  }));
+}
+// grid columns per view
+function weekCols(ws) {
+  const td = todayISO();
+  return weekDays(ws).map((d, i) => ({ date: d, label: `${DAYN[i]}<br>${d.slice(5)}`, today: d === td }));
+}
+function monthCols(ws) {
+  const y = ws.getFullYear(), m = ws.getMonth();
+  const n = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const td = todayISO();
+  return [...Array(n)].map((_, i) => {
+    const date = isoDate(new Date(Date.UTC(y, m, i + 1)));
+    const wd = new Date(date + "T12:00:00").getDay();
+    return { date, label: `${DAYN[wd][0]} ${i + 1}`, wknd: wd === 5 || wd === 6, today: date === td };
+  });
+}
+function yearCols(ws) {
+  const y = ws.getFullYear();
+  const now = new Date();
+  return MONTHS.map((nm, i) => ({ key: `${y}-${String(i + 1).padStart(2, "0")}`, m: i + 1, label: nm, today: y === now.getFullYear() && i === now.getMonth() }));
+}
+// rows after search + status filter + sort
+function gridRows() {
+  let rows = visibleEmployees();
+  const q = S.gt.search.trim().toLowerCase();
+  if (q) rows = rows.filter(p => (p.name || "").toLowerCase().includes(q) || String(p.employee).toLowerCase().includes(q));
+  if (S.gt.status !== "all") rows = rows.filter(p => statusMatch(p, S.gt.date || todayISO()));
+  const s = S.gt.sort;
+  return [...rows].sort((a, b) => s === "name-desc" ? b.name.localeCompare(a.name)
+    : s === "emp" ? String(a.employee).localeCompare(String(b.employee), undefined, { numeric: true })
+    : a.name.localeCompare(b.name));
+}
+// status of one person on one date (for the status filter)
+function statusMatch(p, date) {
+  const st = S.gt.status;
+  if (st === "all" || !date) return true;
+  const oc = S.oncall.some(o => o.employee === p.employee && o.date === date);
+  const reqs = requestsFor(p.employee, date);
+  const hasType = t => reqs.some(r => r.type === t);
+  const trn = S.training.some(t => t.employee === p.employee && t.start <= date && (t.end || t.start) >= date);
+  const evs = S.signins.filter(x => x.employee === p.employee && (x.at || "").slice(0, 10) === date);
+  switch (st) {
+    case "oncall": return oc;
+    case "vacation": return hasType("Vacation");
+    case "reset": return hasType("Reset");
+    case "training": return hasType("Training") || trn;
+    case "overtime": return hasType("Overtime");
+    case "callout": return hasType("Call-Out");
+    case "other": return reqs.some(r => !["Vacation", "Reset", "Training", "Overtime", "Call-Out"].includes(r.type));
+    case "free": return !oc && !reqs.length && !trn;
+    case "in-loc": return evs.some(x => x.direction === "in" && x.allowed);
+    case "in-out": return evs.some(x => x.direction === "in" && !x.allowed);
+    case "out": return evs.some(x => x.direction === "out");
+    case "nosignin": return evs.length === 0;
+  }
+  return true;
+}
+// compact month-view cell: short chips + sign-in dot
+const TYPE_CODE = { "Vacation": "VAC", "Reset": "RST", "Training": "TRN", "Overtime": "OVT", "Call-Out": "CO", "Work Comp": "WC", "Training Comp": "TC" };
+const typeCode = t => TYPE_CODE[t] || String(t).slice(0, 3).toUpperCase();
+const chipClass = t => (TYPE_CLASS[t] || "b-other").replace("b-", "c-");
+function cellChips(emp, date) {
+  const out = [];
+  const oc = S.oncall.find(o => o.employee === emp && o.date === date);
+  if (oc) out.push(`<span class="chip c-oncall" title="On-call">OC</span>`);
+  for (const r of requestsFor(emp, date)) {
+    out.push(`<span class="chip ${chipClass(r.type)}" title="${esc(r.type)} — ${stLabel[r.status] || r.status}">${esc(typeCode(r.type))}</span>`);
+  }
+  const evs = S.signins.filter(x => x.employee === emp && (x.at || "").slice(0, 10) === date);
+  if (evs.length) {
+    const last = evs[0]; // newest first
+    const cls = last.direction === "out" ? "out" : last.allowed ? "ok" : "bad";
+    const title = last.direction === "out" ? "Signed out" : last.allowed ? "Signed in (site)" : "Signed in (outside site)";
+    out.push(`<span class="sdot ${cls}" title="${title}"></span>`);
+  }
+  return out.join("") || "&nbsp;";
+}
+// year-view cell: counts for that month
+function cellYear(emp, y, m) {
+  const mm = String(m).padStart(2, "0");
+  const first = `${y}-${mm}-01`;
+  const last = `${y}-${mm}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+  const out = [];
+  const ocDays = S.oncall.filter(o => o.employee === emp && o.date >= first && o.date <= last).length;
+  if (ocDays) out.push(`<span class="chip c-oncall" title="On-call days in ${MONTHS[m - 1]}">${ocDays} OC</span>`);
+  const counts = {};
+  for (const r of S.requests) {
+    if (r.employee !== emp || r.status === ST.cancelled) continue;
+    const a = r.date, b = r.date2 || r.date;
+    if (a <= last && b >= first) counts[r.type] = (counts[r.type] || 0) + 1;
+  }
+  for (const t of Object.keys(counts)) {
+    out.push(`<span class="chip ${chipClass(t)}" title="${esc(t)} requests in ${MONTHS[m - 1]}">${counts[t]} ${esc(typeCode(t))}</span>`);
+  }
+  return out.join("") || '<span class="m">·</span>';
 }
 function cellHTML(emp, date) {
   const out = [];
@@ -846,10 +974,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   $$("#nav button").forEach(b => b.addEventListener("click", () => showScreen(b.dataset.screen)));
   $("#btn-signin").addEventListener("click", () => doSign("in"));
   $("#btn-signout").addEventListener("click", () => doSign("out"));
-  $("#wk-prev").addEventListener("click", async () => { S.weekStart = addDays(S.weekStart, -7); await refresh(); });
-  $("#wk-next").addEventListener("click", async () => { S.weekStart = addDays(S.weekStart, 7); await refresh(); });
+  $("#wk-prev").addEventListener("click", async () => {
+    const x = new Date(S.weekStart);
+    if (S.gridView === "year") x.setFullYear(x.getFullYear() - 1);
+    else if (S.gridView === "month") x.setMonth(x.getMonth() - 1);
+    else x.setDate(x.getDate() - 7);
+    S.weekStart = x; await refresh();
+  });
+  $("#wk-next").addEventListener("click", async () => {
+    const x = new Date(S.weekStart);
+    if (S.gridView === "year") x.setFullYear(x.getFullYear() + 1);
+    else if (S.gridView === "month") x.setMonth(x.getMonth() + 1);
+    else x.setDate(x.getDate() + 7);
+    S.weekStart = x; await refresh();
+  });
   $("#wk-today").addEventListener("click", async () => { S.weekStart = startOfWeek(new Date()); await refresh(); });
   $("#wk-refresh").addEventListener("click", async () => { await refresh(); toast("Refreshed"); });
+  $$("#viewtoggle button").forEach(b => b.addEventListener("click", async () => {
+    if (S.gridView === b.dataset.view) return;
+    S.gridView = b.dataset.view;
+    await refresh();
+  }));
+  $("#gt-search").addEventListener("input", () => { S.gt.search = $("#gt-search").value; renderToday(); });
+  $("#gt-sort").addEventListener("change", () => { S.gt.sort = $("#gt-sort").value; renderToday(); });
+  $("#gt-date").addEventListener("change", () => { S.gt.date = $("#gt-date").value || todayISO(); renderToday(); });
+  $("#gt-status").addEventListener("change", () => { S.gt.status = $("#gt-status").value; renderToday(); });
+  $("#gt-date").value = todayISO();
   $("#req-form").addEventListener("submit", async e => {
     e.preventDefault();
     const body = {

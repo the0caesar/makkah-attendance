@@ -269,7 +269,7 @@ async function handleApi(env, method, path, q, body, m) {
   if (p === "/api/oncall") {
     const f = g("from", "2000-01-01"), t = g("to", "2999-12-31");
     const r = await call(env, "GET",
-      `new_oncalls?$select=new_oncall_name,new_oncall_employeenumber,new_oncall_date,new_oncall_source,new_oncall_assignedby&$filter=(new_oncall_date ge ${f}T00:00:00Z) and (new_oncall_date le ${t}T23:59:59Z)`);
+      `new_oncalls?$select=new_oncall_name,new_oncall_employeenumber,new_oncall_date,new_oncall_source,new_oncall_assignedby&$filter=(new_oncall_date ge ${f}T00:00:00Z) and (new_oncall_date le ${t}T23:59:59Z)&$top=10000`);
     if (r.status !== 200) return [];
     return (r.body.value || []).map((x) => ({
       employee: x.new_oncall_employeenumber, date: d10(x.new_oncall_date),
@@ -280,7 +280,7 @@ async function handleApi(env, method, path, q, body, m) {
   if (p === "/api/training") {
     const f = g("from", "2000-01-01"), t = g("to", "2999-12-31");
     const r = await call(env, "GET",
-      `new_trainings?$select=new_training_employeenumber,new_training_course,new_training_startdate,new_training_enddate,new_training_subject&$filter=(new_training_startdate ge ${f}T00:00:00Z) and (new_training_enddate le ${t}T23:59:59Z)`);
+      `new_trainings?$select=new_training_employeenumber,new_training_course,new_training_startdate,new_training_enddate,new_training_subject&$filter=(new_training_startdate ge ${f}T00:00:00Z) and (new_training_enddate le ${t}T23:59:59Z)&$top=10000`);
     if (r.status !== 200) return [];
     return (r.body.value || []).map((x) => ({
       employee: x.new_training_employeenumber, course: x.new_training_course,
@@ -298,7 +298,7 @@ async function handleApi(env, method, path, q, body, m) {
       filt = `(${filt}) and (new_requests_status eq ${map[q.status[0]]})`;
     }
     const r = await call(env, "GET",
-      `new_requestses?$select=new_requestsid,new_requests_name,new_requests_employeenumber,new_requests_type,new_requests_date,new_requests_date2,new_requests_otheremp,new_requests_status,new_requests_reason,new_requests_approver,new_requests_requestedat,new_requests_decidedat,new_requests_proofurl,new_requests_exceeds,new_requests_absentnote&$filter=(${filt}) and (new_requests_date le ${t}T23:59:59Z) and (new_requests_date2 eq null or new_requests_date2 le ${t}T23:59:59Z)`);
+      `new_requestses?$select=new_requestsid,new_requests_name,new_requests_employeenumber,new_requests_type,new_requests_date,new_requests_date2,new_requests_otheremp,new_requests_status,new_requests_reason,new_requests_approver,new_requests_requestedat,new_requests_decidedat,new_requests_proofurl,new_requests_exceeds,new_requests_absentnote&$filter=(${filt}) and (new_requests_date le ${t}T23:59:59Z) and (new_requests_date2 eq null or new_requests_date2 le ${t}T23:59:59Z)&$top=10000`);
     let rows = (r.status === 200 && isObj(r.body)) ? (r.body.value || []).map(reqRow) : [];
     rows = rows.filter((x) => x.date >= f);
     rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));

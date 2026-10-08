@@ -172,7 +172,12 @@ Columns: `new_name` (primary), `new_value` (Integer, max 100!), `new_value_str` 
 - Requester (non-approver) sees **their own** requests only (RLS rule 5.5).
 
 ### 5.4 Team grid (Teams-Shifts style)
-- People (roster rows) × days (week, Sun–Sat; prev/next week nav; month strip).
+- People (roster rows) × days — with **view toggle: Week / Month / Year** (built 2026-10-08):
+  - **Week** (default): 7 day columns, full badges.
+  - **Month**: all days of the month (compact chips: `OC`, `VAC`, `RST`, `TRN`, `OVT`, `CO`… + sign-in dot ●; weekends shaded; click a day → detail).
+  - **Year**: 12 month columns with per-month **counts** (`3 OC`, `2 VAC`…; click a month → drills into that month's view).
+  - Prev/Next nav steps per view (week / month / year); "Today" recenters. Data window auto-matches the view (Worker `$top=10000` on oncall/requests/training so a year never truncates).
+- **Filter/sort toolbar** (built 2026-10-08): search rows by name/number; sort rows (Name A→Z / Z→A / Number); **status filter on a chosen day** (date input, default today): On-call / Vacation / Reset / Training / Overtime / Call-Out / Other / **Free** / Signed in (site) / Signed in (outside) / Signed out / No sign-in.
 - Cell badges (data-driven from `new_requests` + `new_oncall` + `new_signin`): on-call, vacation, reset, training, overtime, … signed in (allowed location), signed in (outside), signed out, not signed in yet.
 - Cell = everything about that person that day (constraint 3 of original ask).
 - RLS off → all rows visible to everyone (supervisor mode). RLS on → only own row + (supervisors) all rows.
@@ -223,6 +228,9 @@ A shift (per Essam) has at least:
 - All future work logged in §9.
 
 ## 7. BUILD STATE (live tracker)
+
+> **FOCUS (Essam 2026-10-08):** perfect the sign-in/out experience.
+> **2026-10-08 done:** grid views (Week/Month/Year) + filter/sort toolbar — BUILT, deployed, manifest v1.0.5.
 
 | # | Step | Status | Notes |
 |---|------|--------|-------|
@@ -285,6 +293,12 @@ A shift (per Essam) has at least:
 - **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-08 (grid: week/month/year views + filter/sort toolbar)
+- **Ask (Essam):** can only see one week; wants **month** (all weeks of the month) and **year** (all months) views; and the grid should be **filterable + sortable** — e.g. "on a specific day, who is on vacation / on call / free".
+- **Built:** (1) **Week / Month / Year view toggle** in the grid nav. Month = all days w/ compact chips (OC/VAC/RST/TRN/OVT/CO…) + sign-in dot, weekends shaded, click day → detail. Year = 12 month columns with per-month counts, click month → drills into month view. Prev/Next steps per view; data window auto-matches view (Worker `$top=10000` on oncall/requests/training so a year never silently truncates at 1000 rows). (2) **Toolbar:** search rows (name/number), sort rows (A→Z / Z→A / number), **status filter on a chosen day** (default today): on-call, vacation, reset, training, overtime, call-out, other, **free** (no on-call/request/training that day), signed in (site / outside), signed out, no sign-in.
+- **Deployed:** Worker (year-safe `$top`) + Pages `app.js?v=20261008a` + manifest **v1.0.5**. Verified live: all 3 range endpoints OK with a full-year window; year data = Essam's test vacation (2026-10-08).
+- **Open:** Essam to test v1.0.5 (install zip). Refine month/year density later if needed.
 
 ### 2026-10-07 (night — Essam redefines "Shifts"; focus shifts to sign-in/out)
 - **CORRECTION (Essam, 22:00):** "Shifts" was misunderstood. It is **NOT on-call** — it's **real work shifts**: the team goes on shifts for ~a month (less/equal/more). A shift has: **type** (selectable kind), **how many people**, **shift in-charge**, **duration**. On-call is a separate feature (stays as-is). The live Shifts tab is a **v1 placeholder** under the old interpretation → to be **reworked** to the real shift model (§5.8 now has the corrected spec + open questions).
