@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (site picker: map + click + name + radius)
+- **Ask (Essam):** "make it open a map and I can click on the location, then right there name it and define the radius."
+- **Done:** `geo.html` is now a **Leaflet + OpenStreetMap picker** (no key/account, CDN 1.9.4): full-screen map, centers on GPS (fallback Makkah), **click or drag the pin**, **live radius circle** (follows the radius input), **name + radius form** right there, **Copy** + **"Send to Protection Portal →"** → `/app/?site=lat,lon&name=..&radius=..`. App boot hook extended: prefills lat/lon **and name and radius** → user just presses **Add site**.
+- **Deploy:** cache-bust `?v=20261008d`. Verified live: geo.html 200 (Site Picker + leaflet present), index serves 20261008d, prefill marker present. No worker change (geo.html already allow-listed), no zip.
+
 ### 2026-10-08 (location helper — Teams desktop has no GPS)
 - **Report (Essam):** adding a site — "📍 My location" times out (desktop, browser location allowed).
 - **Root cause:** the Teams **desktop** webview does not expose geolocation to tab content — `getCurrentPosition` hangs until timeout. Mobile Teams works (that's how phone sign-in gets GPS).

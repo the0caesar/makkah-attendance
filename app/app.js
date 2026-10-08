@@ -1047,12 +1047,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
   }
-  // location-helper handoff: geo.html (external browser) opens the app with ?site=lat,lon
+  // location-helper handoff: geo.html (map picker) opens the app with ?site=lat,lon&name=..&radius=..
   const sm = /[?&]site=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/.exec(location.search);
   if (sm && S.me && S.me.is_approver) {
     S.adminTab = "sites";
     showScreen("admin");
-    const lat = $("#sf-lat"), lon = $("#sf-lon");
-    if (lat && lon) { lat.value = sm[1]; lon.value = sm[2]; toast("Location from helper pre-filled — set name + radius, then Add site"); }
+    const lat = $("#sf-lat"), lon = $("#sf-lon"), nm = $("#sf-name"), rd = $("#sf-radius");
+    if (lat && lon) {
+      lat.value = sm[1]; lon.value = sm[2];
+      const nmM = /[?&]name=([^&]+)/.exec(location.search);
+      const rdM = /[?&]radius=(\d+)/.exec(location.search);
+      if (nmM && nm) nm.value = decodeURIComponent(nmM[1]);
+      if (rdM && rd) rd.value = rdM[1];
+      toast("Site picked from map — press Add site");
+    }
   }
 });

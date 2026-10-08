@@ -3,77 +3,118 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Location Helper — Protection Portal</title>
+<title>Site Picker — Protection Portal</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   :root { --bg:#0d1630; --card:#15234a; --accent:#4cc2ff; --text:#e8eefc; --muted:#9fb0d8; --ok:#3ddc84; --err:#ff6b6b; }
   * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         background:var(--bg); color:var(--text);
-         font-family:"Segoe UI",system-ui,-apple-system,sans-serif; padding:24px; }
-  .card { background:var(--card); border:1px solid #24407c; border-radius:14px; padding:28px 32px;
-          max-width:520px; width:100%; text-align:center; }
-  h1 { font-size:20px; margin:0 0 8px; }
-  p.sub { color:var(--muted); font-size:13.5px; margin:0 0 18px; line-height:1.5; }
-  #status { font-size:15px; padding:18px 0; color:var(--muted); }
-  #status.err { color:var(--err); }
-  .big { font-size:30px; font-weight:700; letter-spacing:.5px; color:var(--accent); margin:14px 0 4px; word-break:break-all; }
-  #acc { color:var(--muted); font-size:13px; margin-bottom:18px; }
-  .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
-  button, a.btn { font:inherit; font-size:14px; padding:10px 18px; border-radius:8px; cursor:pointer;
-                  border:1px solid #24407c; background:#1b2a54; color:var(--text); text-decoration:none;
-                  display:inline-block; }
-  a.primary { background:var(--accent); border-color:var(--accent); color:#06122b; font-weight:700; }
-  button:active, a:active { transform:translateY(1px); }
-  .hint { margin-top:16px; font-size:12.5px; color:var(--muted); line-height:1.5; }
-  code { background:#0a1226; padding:2px 6px; border-radius:5px; font-size:12px; }
+  html, body { margin:0; height:100%; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; }
+  #map { position:absolute; inset:0; background:#0a1226; }
+  .card { position:absolute; top:14px; left:14px; z-index:1000; background:var(--card);
+         border:1px solid #24407c; border-radius:14px; padding:18px 20px; width:330px; max-width:calc(100vw - 28px);
+         box-shadow:0 8px 28px rgba(0,0,0,.45); color:var(--text); }
+  h1 { font-size:17px; margin:0 0 4px; }
+  p.sub { color:var(--muted); font-size:12.5px; margin:0 0 12px; line-height:1.45; }
+  #status { font-size:13px; color:var(--muted); margin-bottom:10px; min-height:16px; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--err); }
+  .coord { font-size:14px; font-weight:700; color:var(--accent); margin-bottom:10px; word-break:break-all; }
+  label { display:block; font-size:12.5px; color:var(--muted); margin:9px 0 3px; }
+  input[type=text], input[type=number] { width:100%; font:inherit; font-size:14px; padding:8px 10px; border-radius:8px;
+        border:1px solid #24407c; background:#0a1226; color:var(--text); }
+  input:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:8px; margin-top:14px; }
+  button, a.btn { font:inherit; font-size:14px; padding:10px 14px; border-radius:8px; cursor:pointer;
+        border:1px solid #24407c; background:#1b2a54; color:var(--text); text-decoration:none; text-align:center; }
+  a.primary { background:var(--accent); border-color:var(--accent); color:#06122b; font-weight:700; flex:1; }
+  .hint { margin-top:10px; font-size:11.5px; color:var(--muted); line-height:1.45; }
+  .leaflet-container { font-family:inherit; }
 </style>
 </head>
 <body>
+<div id="map"></div>
 <div class="card">
-  <h1>📍 Location Helper</h1>
-  <p class="sub">For <b>Protection Portal</b> — Teams can't read GPS on desktop, so this page grabs your
-  location here in the browser and hands it back to the app.</p>
-
+  <h1>📍 Site Picker</h1>
+  <p class="sub">For <b>Protection Portal</b>. Click the map (or drag the pin) to pick the exact spot,
+  then name it and set the radius.</p>
   <div id="status">Getting your location…</div>
-
-  <div id="result" hidden>
-    <div class="big" id="big"></div>
-    <div id="acc"></div>
-    <div class="row">
-      <button id="copy">Copy coordinates</button>
-      <a id="open" class="btn primary" href="#">Open Protection Portal →</a>
-    </div>
-    <div class="hint">The app opens with these coordinates pre-filled in <b>Admin → Sites</b>.<br>
-      Just add a name and radius, then press <b>Add site</b>.</div>
+  <div class="coord" id="coord" hidden></div>
+  <label>Name</label>
+  <input type="text" id="name" maxlength="100" placeholder="Main office">
+  <label>Radius (meters)</label>
+  <input type="number" id="radius" value="200" min="10" max="10000" step="10">
+  <div class="row">
+    <a id="send" class="btn primary" href="#" target="_blank">Send to Protection Portal →</a>
+    <button id="copy">Copy</button>
   </div>
+  <div class="hint">The circle shows the radius live. "Send" opens the app with everything pre-filled — you only press <b>Add site</b>.</div>
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-  const APP = "https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/?site=";
+  const APP = "https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/";
+  const MKH = [24.4686, 39.6142];              // Makkah fallback center
   const status = document.getElementById("status");
-  function done(p) {
-    const lat = p.coords.latitude.toFixed(6), lon = p.coords.longitude.toFixed(6);
-    status.hidden = true;
-    document.getElementById("result").hidden = false;
-    document.getElementById("big").textContent = lat + ", " + lon;
-    document.getElementById("acc").textContent = "Accuracy ±" + Math.round(p.coords.accuracy) + " m";
-    document.getElementById("open").href = APP + lat + "," + lon;
+  const coordEl = document.getElementById("coord");
+  const nameEl = document.getElementById("name");
+  const radiusEl = document.getElementById("radius");
+  const sendEl = document.getElementById("send");
+
+  const map = L.map("map").setView(MKH, 13);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+
+  let marker = null, circle = null, pos = null;
+
+  function update() {
+    if (!pos) return;
+    const lat = pos.lat.toFixed(6), lon = pos.lon.toFixed(6);
+    coordEl.hidden = false;
+    coordEl.textContent = lat + ", " + lon;
+    const r = parseInt(radiusEl.value, 10) || 200;
+    if (circle) circle.setLatLng([pos.lat, pos.lon]).setRadius(r);
+    else circle = L.circle([pos.lat, pos.lon], { radius: r, color: "#4cc2ff", weight: 2, fillOpacity: 0.12 }).addTo(map);
+    const name = nameEl.value;
+    sendEl.href = APP + "?site=" + lat + "," + lon +
+      (name ? "&name=" + encodeURIComponent(name) : "") +
+      "&radius=" + r;
   }
-  function fail(e) {
-    status.textContent = {1:"Location permission denied — allow location for this site in your browser, then reload.",
-                          2:"Position unavailable (GPS off / no fix?)", 3:"Timed out — press the reload button."}[e.code] || "Location error.";
-    status.className = "err";
-    status.innerHTML += ' <button id="retry" style="margin-left:8px">Retry</button>';
-    const r = document.getElementById("retry");
-    if (r) r.onclick = () => location.reload();
+  function onDrag() { const p = marker.getLatLng(); pos = { lat: p.lat, lon: p.lng }; update(); }
+  function place(lat, lon, acc) {
+    pos = { lat: lat, lon: lon };
+    if (!marker) { marker = L.marker([lat, lon], { draggable: true }).addTo(map); marker.on("dragend", onDrag); }
+    else marker.setLatLng([lat, lon]);
+    map.panTo([lat, lon], { zoom: Math.max(map.getZoom(), 16), animate: true });
+    update();
+    status.textContent = (acc != null ? "Accuracy ±" + Math.round(acc) + " m. " : "") + "Drag the pin to the exact spot.";
+    status.className = "ok";
   }
+  map.on("click", e => {
+    pos = { lat: e.latlng.lat, lon: e.latlng.lng };
+    if (!marker) { marker = L.marker(e.latlng, { draggable: true }).addTo(map); marker.on("dragend", onDrag); }
+    else marker.setLatLng(e.latlng);
+    update();
+    status.textContent = "Click to fine-tune, or drag the pin.";
+    status.className = "ok";
+  });
+
+  nameEl.addEventListener("input", update);
+  radiusEl.addEventListener("input", update);
+
   if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(done, fail, { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 });
-  } else { fail({ code: 2 }); }
+    navigator.geolocation.getCurrentPosition(
+      p => place(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
+      () => { status.textContent = "Starting from Makkah — click the map to pick your site."; status.className = "err"; },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  } else {
+    status.textContent = "Starting from Makkah — click the map to pick your site.";
+    status.className = "err";
+  }
+
   document.getElementById("copy").addEventListener("click", async () => {
+    if (!pos) return;
     try {
-      await navigator.clipboard.writeText(document.getElementById("big").textContent);
-      const b = document.getElementById("copy"); b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy coordinates", 1600);
-    } catch (e) { }
+      await navigator.clipboard.writeText(pos.lat.toFixed(6) + ", " + pos.lon.toFixed(6));
+      const b = document.getElementById("copy"); b.textContent = "Copied ✓"; setTimeout(() => b.textContent = "Copy", 1500);
+    } catch (e) {}
   });
 </script>
 </body>
