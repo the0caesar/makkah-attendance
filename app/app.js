@@ -88,10 +88,12 @@ function getLocation(ms = 15000) {
 }
 
 // ---------- map picker (in-app Leaflet overlay; no separate page, no second sign-in) ----------
-let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null, mpEdit = null; // mpEdit = site object when editing a saved site
+let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null, mpEdit = null, mpSitesLayer = null, mpAll = false; // mpEdit = site object when editing a saved site; mpAll = all-sites map mode
 function openMapPicker(site) {
   if (!window.L) { toast("Map couldn't load inside the app — use 🌐 Open in browser instead.", "err"); return; }
   mpEdit = site || null;
+  mpAll = false;
+  $("#mp-sites-list").style.display = "none";
   $("#map-picker").style.display = "block";
   $("#mp-coord").textContent = "";
   const st = $("#mp-status");
@@ -160,6 +162,7 @@ async function useMapLocation() {
       toast("Site updated");
       $("#map-picker").style.display = "none"; mpEdit = null;
       await loadBase(); renderAdmin();
+      if (mpAll) openSitesMap(); // back to the all-sites overview with fresh data
     } catch (e) { toast(e.message, "err"); }
     return;
   }
@@ -172,6 +175,76 @@ async function useMapLocation() {
   toast("Location set — press Add site");
 }
 function cancelMapPicker() { $("#map-picker").style.display = "none"; }
+
+// ---------- all-sites map mode: every saved site shown, click one to edit ----------
+function ensureMpMap() {
+  if (mpMap) return;
+  mpMap = L.map("mp-map").setView([24.4686, 39.6142], 14); // Makkah
+  const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" });
+  const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 19, attribution: "© OpenStreetMap contributors" });
+  L.control.layers({ "Satellite": sat, "Streets": streets }, null, { position: "topright" }).addTo(mpMap);
+  sat.addTo(mpMap);
+  mpMap.on("click", e => mpPlace(e.latlng.lat, e.latlng.lng, null));
+}
+function redrawSitesLayer() {
+  if (!mpMap) return;
+  if (mpSitesLayer) mpMap.removeLayer(mpSitesLayer);
+  mpSitesLayer = L.layerGroup();
+  (S.sites || []).forEach(s => {
+    const lat = parseFloat(s.lat), lon = parseFloat(s.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    L.circle([lat, lon], { radius: s.radius || 200, color: "#4cc2ff", weight: 1.5, fillOpacity: 0.1 })
+      .addTo(mpSitesLayer).on("click", () => startEditFromMap(s));
+    L.marker([lat, lon], { draggable: false, opacity: s.enabled === false ? 0.45 : 1 })
+      .addTo(mpSitesLayer)
+      .bindTooltip((s.name || "Site") + (s.enabled === false ? " (disabled)" : ""), { permanent: true, direction: "top", offset: [0, -26] })
+      .on("click", () => startEditFromMap(s));
+  });
+  mpSitesLayer.addTo(mpMap);
+  const pts = (S.sites || []).map(s => [parseFloat(s.lat), parseFloat(s.lon)]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  if (pts.length === 1) mpMap.setView(pts[0], 15);
+  else if (pts.length > 1) mpMap.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+}
+function openSitesMap() {
+  if (!window.L) { toast("Map couldn't load inside the app.", "err"); return; }
+  mpAll = true;
+  mpEdit = null;
+  $("#map-picker").style.display = "block";
+  $("#mp-name").value = "";
+  $("#mp-radius").value = 200;
+  $("#mp-use").textContent = "— select a site —";
+  $("#mp-coord").textContent = "";
+  const st = $("#mp-status");
+  st.textContent = (S.sites && S.sites.length) ? "Tap a site (or its name) to edit it — move the pin, then Save changes." : "No sites yet — add one above first.";
+  st.className = "hint";
+  // name list (easier than tapping tiny markers)
+  const list = $("#mp-sites-list");
+  list.innerHTML = (S.sites || []).map((s, i) =>
+    `<button data-i="${i}">${esc(s.name || "Site")} <span class="m">${s.lat}, ${s.lon} • ${s.radius}m${s.enabled === false ? " • disabled" : ""}</span></button>`).join("");
+  list.style.display = (S.sites && S.sites.length) ? "block" : "none";
+  list.querySelectorAll("button").forEach(b => b.addEventListener("click", () => startEditFromMap(S.sites[+b.dataset.i])));
+  ensureMpMap();
+  mpMap.invalidateSize();
+  redrawSitesLayer();
+}
+function startEditFromMap(site) {
+  mpEdit = site;
+  mpPos = { lat: parseFloat(site.lat), lon: parseFloat(site.lon) };
+  $("#mp-name").value = site.name || "";
+  $("#mp-radius").value = site.radius || 200;
+  $("#mp-use").textContent = "Save changes";
+  const st = $("#mp-status");
+  st.textContent = `Editing: ${site.name || "site"} — move the pin or adjust the radius, then Save changes.`;
+  st.className = "hint";
+  if (!mpMarker) {
+    mpMarker = L.marker([mpPos.lat, mpPos.lon], { draggable: true }).addTo(mpMap);
+    mpMarker.on("dragend", () => { const p = mpMarker.getLatLng(); mpPos = { lat: p.lat, lon: p.lng }; mpUpdate(); });
+  } else mpMarker.setLatLng([mpPos.lat, mpPos.lon]);
+  mpMap.panTo([mpPos.lat, mpPos.lon], Math.max(mpMap.getZoom(), 15));
+  mpUpdate();
+}
 
 // ---------- identity (Teams SSO → PKCE fallback; see SPEC.md §3) ----------
 let AUTH_ERR = null; // last sign-in failure reason, shown on the auth screen
@@ -837,6 +910,7 @@ function renderAdminSites() {
     <label>Longitude <input id="sf-lon" type="number" step="any" required></label>
     <label>Radius (m) <input id="sf-radius" type="number" value="200" required></label>
     <button class="btn ghost" type="button" id="sf-geo-map">🗺️ Pick on map</button>
+    <button class="btn ghost" type="button" id="sf-geo-all">🗺️ All sites</button>
     <button class="btn ghost" type="button" id="sf-geo">📍 My location</button>
     <a class="btn ghost" id="sf-geo-browser" href="https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/geo.html" target="_blank" title="Fallback: opens the map picker in your browser">🌐 Open in browser</a>
     <button class="btn primary" type="submit">Add site</button>
@@ -870,6 +944,7 @@ function renderAdminSites() {
     setTimeout(() => { delete b.dataset.arm; b.textContent = old; b.title = ""; }, 3500);
   }));
   $("#sf-geo-map").addEventListener("click", openMapPicker);
+  $("#sf-geo-all").addEventListener("click", openSitesMap);
   $("#mp-use").addEventListener("click", useMapLocation);
   $("#mp-cancel").addEventListener("click", cancelMapPicker);
   $("#mp-radius").addEventListener("input", mpUpdate);

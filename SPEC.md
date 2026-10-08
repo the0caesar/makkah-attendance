@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (all-sites map)
+- **Ask (Essam):** "open the map that shows all saved sites and I can click on them to edit them."
+- **Done:** new **🗺️ All sites** button in the Sites tab — opens the same in-app satellite map with **every saved site**: named marker (disabled sites dimmed + labelled) + its **radius circle**, map auto-fits all sites. Click a **marker, its circle, or a name in the list** (scrollable list in the card — easier than tiny markers) → switches to **edit mode for that site** (pin there, name/radius pre-filled, "Save changes"). After saving it returns to the overview with fresh data.
+- **Deploy:** frontend-only, cache-bust `?v=20261008j`. Verified live: markers present.
+
 ### 2026-10-08 (saved-site map: in-app edit)
 - **Ask (Essam):** "when I click map on a saved site, open the same map we use to locate it, and give the option to edit that site specifically."
 - **Done:** row button **🗺️ Map** (replaces the external Google link) opens the **same in-app satellite map** centered on that site at zoom 16, pin placed on it, **name + radius pre-filled** from the site. Button reads **Save changes** → PATCHes that site's name/lat/lon/radius → list refreshes (loadBase). New-site flow unchanged (GPS hunt + "Use this location"). Worker `PATCH /api/admin/sites/:id` now also accepts `name`.
