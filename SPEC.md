@@ -6,7 +6,7 @@
 > **DURABLE LOG (Essam's standing instruction, 2026-10-07):** EVERYTHING discussed or decided
 > about this app — requirements, corrections, design decisions, "refine later" items — gets logged
 > here (session log + relevant sections). Nothing app-related lives only in chat.
-> Last updated: **2026-10-07 (night — shifts redefinition logged; focus = perfecting sign-in/out)**
+> Last updated: **2026-10-08 (SharePoint single-file build complete + uploaded; live URL in SD ORDERS; Azure redirect step pending)**
 
 ## 1. Goal
 
@@ -294,6 +294,16 @@ A shift (per Essam) has at least:
 - **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-08 (SharePoint single-file build + upload — WORKER RETIRED)
+- **Ask (Essam):** after "host it on SharePoint" was confirmed to act exactly like now, "go ahead just build it and let me know when you're done." Map imagery explicitly kept ("don't remove it yet").
+- **Build:** `deploy/sharepoint/ProtectionPortal.html` — ONE self-contained file (775,278 bytes). Inlines `style.css`, Leaflet 1.9.4 (js+css), `teams.js` (2.57.0), `msal-browser` (5.25.0), and a ported `app.js`. All external `<script src>` / `<link href>` removed (only the Leaflet CDN `<script>` + Esri/OSM tile URLs remain external — kept per Essam).
+- **Architecture change (KEY):** the Cloudflare **Worker is retired for the web app**. The app now talks **browser → Dataverse DIRECTLY** with the signed-in user's own access token (`user_impersonation`, scope `https://org951b4d88.crm4.dynamics.com/.default`). The worker's `handleApi` was ported 1:1 into the page as a local `handleApi(m, method, path, q, body)`; `api(path, opts)` is now a local router. Identity = MSAL `id_token` email → roster match (number-in-UPN first, exact-email last) — same as worker. `ADMIN_ONLY_NUMBERS` ("63021,68589") inlined as a const (was a worker env var). **Worker stays alive only for the reminder cron.**
+- **Verified this session:** (a) `node --check` passes on the assembled JS. (b) In the headless browser the app boots, MSAL inits, and fires a correct AAD authorize request — `client_id=0cf32ba0…`, `response_type=code`, `scope=openid profile email …/.default offline_access`, `code_challenge_method=S256`, redirect = the page URL; AAD returned the sign-in page (no AADSTS error = client valid, PKCE/public-client accepted). (c) The file is served on SharePoint **inline**: HTTP 200, `content-type: text/html`, exact 775,278 bytes.
+- **Upload location (MISTAKE, corrected in report to Essam):** the file landed in the **`SD ORDERS` subfolder**, NOT the Documents root. Cause: the Documents library's **default view is the SD ORDERS folder**, so "Files upload" targeted the active folder. I first told Essam "root" — **that was wrong**. Proven by the view URL's `id=` param: `/sites/Prot_Mak/Shared Documents/SD ORDERS`. **Working live URL:** `https://seccomsa.sharepoint.com/sites/Prot_Mak/Shared%20Documents/SD%20ORDERS/ProtectionPortal.html`.
+- **Moving to root: ABANDONED (cosmetic only).** ~10 CDP attempts at the SharePoint move (row checkbox won't register via synthetic click, hover-menus die between separate script runs, command-bar "More" sub-menu) were fighting the UI with no reliable win. The app works identically from SD ORDERS, so I stopped rather than keep thrashing. If Essam wants it in the root: 3-second manual drag, or a later dedicated pass.
+- **CDP gotcha (this host):** long multi-line bash **heredocs in `terminal` get mangled** (SyntaxErrors, truncated scripts) and get auto-backgrounded when a user message lands mid-run → looked like repeated "pauses". Fix: write each CDP script via the `write_file` tool, then run it with a one-line command. Scripts: `sp_probe.py`, `sp_upload.py`, `sp_locate.py`, `sp_serve.py`, `sp_move*.py` in `cache/scratch/`.
+- **REMAINING (gates go-live):** (1) Essam registers the live URL as a **Mobile and desktop** redirect URI on the `makkah-attendance` Entra app (one-time, ~30 s) — required or MSAL browser-PKCE redemption is refused (AADSTS9002326). (2) Essam opens the URL in his browser + signs in once → first real sign-in live-verified. (3) Optional: Teams manifest `contentUrl` → this SharePoint URL (re-sideloaf v1.0.9) if he wants it as a Teams tab; browser-open is already sufficient.
 
 ### 2026-10-08 (admin-only staff: Ahmad + Nabeel hidden from team)
 - **Ask (Essam):** "make him and nabeel just admins in the app without showing in the team."
