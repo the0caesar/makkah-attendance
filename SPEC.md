@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (site delete)
+- **Ask (Essam):** "give me the option to delete sites."
+- **Done:** worker `DELETE /api/admin/sites/:id` → `DELETE new_sites(guid)` (proven live: fake-GUID probe returned Dataverse 404 = plumbing + permissions OK). Frontend: **Delete** button on every sites row, two-step confirm (native confirm() suppressed in Teams iframe; second click deletes + refresh). Tooltip warns people will stop signing in at a deleted site.
+- **Deploy:** cache-bust `?v=20261008g`, worker deployed. Verified live: index 20261008g, markers present.
+
 ### 2026-10-08 (map picker: satellite imagery)
 - **Ask (Essam):** "make the map show satellite image, or use Google Maps."
 - **Decision:** Google Maps needs a paid API key (dead under $0). Used **Esri World Imagery** (ArcGIS/Maxar satellite tiles) — **free, no API key**, verified live keyless (real Makkah tile → HTTP 200).

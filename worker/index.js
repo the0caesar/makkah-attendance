@@ -524,6 +524,14 @@ async function handleApi(env, method, path, q, body, m) {
       return r.status === 200 ? { ok: true } : [{ error: "write failed", code: r.status }, 400];
     }
 
+    if (ap.startsWith("sites/") && method === "DELETE") {
+      const sid = ap.split("/").pop();
+      const r = await call(env, "DELETE", `new_sites(${sid})`);
+      return [200, 204].includes(r.status)
+        ? { ok: true }
+        : [{ error: "delete failed", code: r.status, body: String(r.body).slice(0, 200) }, 400];
+    }
+
     if (ap.startsWith("employees/") && method === "PATCH") {
       const num = ap.split("/").pop();
       const b = body || {};
