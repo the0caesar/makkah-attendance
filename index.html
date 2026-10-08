@@ -42,12 +42,41 @@
         </div>
       </div>
       <div class="weeknav">
+        <div class="viewtoggle" id="viewtoggle">
+          <button data-view="week" class="active">Week</button>
+          <button data-view="month">Month</button>
+          <button data-view="year">Year</button>
+        </div>
         <button id="wk-prev" class="btn">‹</button>
         <span id="wk-label">—</span>
         <button id="wk-next" class="btn">›</button>
         <button id="wk-today" class="btn ghost">Today</button>
         <button id="wk-refresh" class="btn ghost" title="Refresh">⟳</button>
       </div>
+    </div>
+    <div class="grid-toolbar">
+      <input id="gt-search" type="search" placeholder="Filter people by name or number…" aria-label="Filter people">
+      <select id="gt-sort" aria-label="Sort people">
+        <option value="name-asc">Name A→Z</option>
+        <option value="name-desc">Name Z→A</option>
+        <option value="emp">Number</option>
+      </select>
+      <label class="gt-date">Day <input id="gt-date" type="date" aria-label="Filter day"></label>
+      <select id="gt-status" aria-label="Filter by status">
+        <option value="all">All people</option>
+        <option value="oncall">On-call</option>
+        <option value="vacation">Vacation</option>
+        <option value="reset">Reset</option>
+        <option value="training">Training</option>
+        <option value="overtime">Overtime</option>
+        <option value="callout">Call-Out</option>
+        <option value="other">Other requests</option>
+        <option value="free">Free</option>
+        <option value="in-loc">Signed in (site)</option>
+        <option value="in-out">Signed in (outside)</option>
+        <option value="out">Signed out</option>
+        <option value="nosignin">No sign-in</option>
+      </select>
     </div>
     <div class="grid-wrap">
       <table class="grid" id="grid"></table>
@@ -132,6 +161,6 @@
      builds: MSAL v5.25.0, teams-js v2.57.0 (UMD global: microsoftTeams). -->
 <script src="teams.js"></script>
 <script src="msal-browser.min.js"></script>
-<script src="app.js?v=20261007e"></script>
+<script src="app.js?v=20261008a"></script>
 </body>
 </html>
