@@ -516,6 +516,7 @@ async function handleApi(env, method, path, q, body, m) {
       const sid = ap.split("/").pop();
       const b = body || {};
       const pay = {};
+      if ("name" in b) pay.new_site_name = String(b.name).slice(0, 100);
       if ("enabled" in b) pay.new_site_enabled = b.enabled ? SITE_ON : SITE_OFF;
       if ("radius" in b) pay.new_site_radiusstr = String(parseFloat(b.radius));
       if ("latitude" in b) pay.new_site_latstr = String(parseFloat(b.latitude));

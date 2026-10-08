@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (saved-site map: in-app edit)
+- **Ask (Essam):** "when I click map on a saved site, open the same map we use to locate it, and give the option to edit that site specifically."
+- **Done:** row button **🗺️ Map** (replaces the external Google link) opens the **same in-app satellite map** centered on that site at zoom 16, pin placed on it, **name + radius pre-filled** from the site. Button reads **Save changes** → PATCHes that site's name/lat/lon/radius → list refreshes (loadBase). New-site flow unchanged (GPS hunt + "Use this location"). Worker `PATCH /api/admin/sites/:id` now also accepts `name`.
+- **Deploy:** cache-bust `?v=20261008i`, worker deployed. Verified live: markers present, index 20261008i.
+
 ### 2026-10-08 (site delete: refresh bug)
 - **Report (Essam):** "I have to refresh the app for the deleted site to disappear."
 - **Root cause:** the delete handler called `refresh()` — which re-fetches grid data but NOT sites (sites come from `loadBase()`, only run on full reload). Every other site handler (add/toggle/radius) correctly does `loadBase(); renderAdmin();`. **Fix:** delete now does the same — deleted site disappears immediately, no app reload.

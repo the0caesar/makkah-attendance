@@ -88,12 +88,26 @@ function getLocation(ms = 15000) {
 }
 
 // ---------- map picker (in-app Leaflet overlay; no separate page, no second sign-in) ----------
-let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null;
-function openMapPicker() {
+let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null, mpEdit = null; // mpEdit = site object when editing a saved site
+function openMapPicker(site) {
   if (!window.L) { toast("Map couldn't load inside the app — use 🌐 Open in browser instead.", "err"); return; }
+  mpEdit = site || null;
   $("#map-picker").style.display = "block";
   $("#mp-coord").textContent = "";
-  const st = $("#mp-status"); st.textContent = "Click the map — or drag the pin — to the exact spot."; st.className = "hint";
+  const st = $("#mp-status");
+  if (mpEdit) {
+    $("#mp-name").value = mpEdit.name || "";
+    $("#mp-radius").value = mpEdit.radius || 200;
+    $("#mp-use").textContent = "Save changes";
+    st.textContent = "Move the pin to update this site — or keep its position.";
+    st.className = "hint";
+  } else {
+    $("#mp-name").value = "";
+    $("#mp-radius").value = 200;
+    $("#mp-use").textContent = "Use this location";
+    st.textContent = "Click the map — or drag the pin — to the exact spot.";
+    st.className = "hint";
+  }
   if (!mpMap) {
     mpMap = L.map("mp-map").setView([24.4686, 39.6142], 14); // Makkah
     const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -105,8 +119,12 @@ function openMapPicker() {
     mpMap.on("click", e => mpPlace(e.latlng.lat, e.latlng.lng, null));
   }
   mpMap.invalidateSize();
-  // try GPS briefly (mobile works; Teams desktop hangs -> stays on Makkah, user clicks)
-  if (navigator.geolocation) {
+  if (mpEdit) {
+    // deterministic: open on the site itself (no GPS hunt while editing)
+    mpMap.setView([parseFloat(mpEdit.lat), parseFloat(mpEdit.lon)], 16);
+    mpPlace(parseFloat(mpEdit.lat), parseFloat(mpEdit.lon), null);
+  } else if (navigator.geolocation) {
+    // try GPS briefly (mobile works; Teams desktop hangs -> stays on Makkah, user clicks)
     navigator.geolocation.getCurrentPosition(
       p => mpPlace(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
       () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 });
@@ -129,8 +147,22 @@ function mpUpdate() {
   if (mpCircle) mpCircle.setLatLng([mpPos.lat, mpPos.lon]).setRadius(r);
   else mpCircle = L.circle([mpPos.lat, mpPos.lon], { radius: r, color: "#4cc2ff", weight: 2, fillOpacity: 0.12 }).addTo(mpMap);
 }
-function useMapLocation() {
+async function useMapLocation() {
   if (!mpPos) { toast("Pick a spot on the map first", "err"); return; }
+  if (mpEdit) {
+    // editing a saved site: PATCH it directly
+    try {
+      await api(`/api/admin/sites/${mpEdit.id}`, { method: "PATCH", body: {
+        name: $("#mp-name").value || mpEdit.name,
+        latitude: mpPos.lat.toFixed(6), longitude: mpPos.lon.toFixed(6),
+        radius: parseInt($("#mp-radius").value, 10) || 200,
+      } });
+      toast("Site updated");
+      $("#map-picker").style.display = "none"; mpEdit = null;
+      await loadBase(); renderAdmin();
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
   $("#sf-lat").value = mpPos.lat.toFixed(6);
   $("#sf-lon").value = mpPos.lon.toFixed(6);
   const nm = $("#mp-name").value, rd = $("#mp-radius").value;
@@ -815,10 +847,14 @@ function renderAdminSites() {
     <td>${s.lat}</td><td>${s.lon}</td>
     <td><input class="si-radius" data-id="${s.id}" value="${s.radius}" type="number" style="width:80px"></td>
     <td><span class="switch ${s.enabled ? "on" : ""}" data-id="${s.id}" data-on="${s.enabled}"></span></td>
-    <td><a href="https://maps.google.com/?q=${s.lat},${s.lon}" target="_blank">map</a></td>
+    <td><button class="btn sm" data-site-map="${s.id}">🗺️ Map</button></td>
     <td><button class="btn danger sm" data-site-del="${s.id}">Delete</button></td>
   </tr>`).join("") || '<tr><td colspan="7">No sites yet — add one above (📍 fills your current location).</td></tr>'}
   </table>`;
+  $$("#tab-sites [data-site-map]").forEach(b => b.addEventListener("click", () => {
+    const s = S.sites.find(x => x.id === b.dataset.siteMap);
+    if (s) openMapPicker(s);
+  }));
   $$("#tab-sites [data-site-del]").forEach(b => b.addEventListener("click", async () => {
     // two-step (native confirm() is suppressed in the Teams iframe)
     if (b.dataset.arm) {
