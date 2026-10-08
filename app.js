@@ -77,13 +77,13 @@ function weekDays(ws) { return [...Array(7)].map((_, i) => isoDate(addDays(ws, i
 const DAYN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function getLocation() {
+function getLocation(ms = 15000) {
   return new Promise((res, rej) => {
     if (!navigator.geolocation) return rej(new Error("Geolocation not supported here"));
     navigator.geolocation.getCurrentPosition(
       p => res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
       e => rej(new Error({ 1: "Location permission denied", 2: "Position unavailable (GPS off?)", 3: "Timed out" }[e.code] || "Location error")),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      { enableHighAccuracy: true, timeout: ms, maximumAge: 0 });
   });
 }
 
@@ -751,6 +751,7 @@ function renderAdminSites() {
     <label>Longitude <input id="sf-lon" type="number" step="any" required></label>
     <label>Radius (m) <input id="sf-radius" type="number" value="200" required></label>
     <button class="btn ghost" type="button" id="sf-geo">📍 My location</button>
+    <a class="btn ghost" id="sf-geo-browser" href="https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/geo.html" target="_blank" title="Teams desktop can't read GPS — this opens a helper page in your browser that grabs your location and sends it back">🌐 Get location from browser</a>
     <button class="btn primary" type="submit">Add site</button>
   </form>
   <table><tr><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th></tr>
@@ -764,10 +765,12 @@ function renderAdminSites() {
   </table>`;
   $("#sf-geo").addEventListener("click", async () => {
     try {
-      const g = await getLocation();
+      const g = await getLocation(6000); // short timeout: Teams desktop hangs (no GPS there)
       $("#sf-lat").value = g.lat.toFixed(6); $("#sf-lon").value = g.lon.toFixed(6);
       toast(`Location captured: ${g.lat.toFixed(4)}, ${g.lon.toFixed(4)} (±${Math.round(g.acc)}m)`);
-    } catch (e) { toast(e.message, "err"); }
+    } catch (e) {
+      toast("Location not readable inside Teams — use 🌐 Get location from browser (opens a helper page in your browser).", "err");
+    }
   });
   $("#site-form").addEventListener("submit", async e => {
     e.preventDefault();
@@ -1043,5 +1046,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
     if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
+  }
+  // location-helper handoff: geo.html (external browser) opens the app with ?site=lat,lon
+  const sm = /[?&]site=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/.exec(location.search);
+  if (sm && S.me && S.me.is_approver) {
+    S.adminTab = "sites";
+    showScreen("admin");
+    const lat = $("#sf-lat"), lon = $("#sf-lon");
+    if (lat && lon) { lat.value = sm[1]; lon.value = sm[2]; toast("Location from helper pre-filled — set name + radius, then Add site"); }
   }
 });
