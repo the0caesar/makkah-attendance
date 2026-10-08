@@ -295,6 +295,12 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (map picker: satellite imagery)
+- **Ask (Essam):** "make the map show satellite image, or use Google Maps."
+- **Decision:** Google Maps needs a paid API key (dead under $0). Used **Esri World Imagery** (ArcGIS/Maxar satellite tiles) — **free, no API key**, verified live keyless (real Makkah tile → HTTP 200).
+- **Done:** in-app picker + browser fallback (`geo.html`) now default to **Satellite**, with a **Satellite / Streets** layer switcher (top-right). Zoom default bumped 13 → 14 (satellite reads better zoomed in).
+- **Deploy:** cache-bust `?v=20261008f`. Verified live: index 20261008f, World_Imagery present in live app.js + geo.html, Esri tile 200 keyless.
+
 ### 2026-10-08 (map picker moved INSIDE the app)
 - **Report (Essam):** "make it open within the app — Send to portal opens the portal on another page where I can't sign in."
 - **Why it happened:** the picker's "Send" opened the app URL in a **second browser tab**, which needs a separate Microsoft sign-in. **Fix:** the map picker is now an **in-app Leaflet overlay** (Leaflet 1.9.4 loaded from CDN in index.html): new **🗺️ Pick on map** button in the Sites tab opens a full-screen map **inside the app** (no new page, no second sign-in) — click/drag pin (GPS auto-center when available, fallback Makkah), live radius circle, name + radius form, **"Use this location"** fills the site form right there → press **Add site**. Old 🌐 browser picker kept as fallback (only used if Leaflet fails to load in the Teams webview).
