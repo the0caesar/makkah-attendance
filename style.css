@@ -202,4 +202,10 @@ table.grid.compact td.today-col { background: #19262e; }
 .mp-label input:focus { outline: none; border-color: var(--accent, #4cc2ff); }
 .mp-row { display: flex; gap: 8px; margin-top: 14px; }
 .mp-row .btn { flex: 1; }
+.mp-sites { margin: 6px 0 2px; max-height: 130px; overflow-y: auto; border: 1px solid var(--border, #24407c); border-radius: 8px; }
+.mp-sites button { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; padding: 7px 10px;
+  background: transparent; color: var(--text, #e8eefc); border: none; border-bottom: 1px solid rgba(255,255,255,.07); cursor: pointer; }
+.mp-sites button:last-child { border-bottom: none; }
+.mp-sites button:hover { background: rgba(76,194,255,.12); }
+.mp-sites .m { color: var(--muted, #9fb0d8); font-size: 11px; }
 .leaflet-container { font-family: inherit; background: #0a1226; }
