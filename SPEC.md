@@ -491,3 +491,13 @@ A shift (per Essam) has at least:
 
 ### 2026-09-28 (prior sessions, summarized)
 - Goal set: $0 Teams app; spec confirmed (constraints in §2); Power Apps rejected; GitHub Pages + Azure Function chosen; CORS gap → proxy; Teams custom app zip distribution; reminders 30 min + 10 min loop; extensibility via shared requests engine (type field); 5 new Dataverse tables created by prior session (schema documented in §4).
+
+### 2026-10-08 (SharePoint migration — role access)
+- **Firewall constraint confirmed**: company PCs reach ONLY Microsoft domains (workers.dev denied, github.io reset, azurewebsites.net dns failure). Target: SharePoint-hosted UI + direct Dataverse with per-user tokens.
+- **Security role `Protection Portal team` (bd96b247-edc2-f111-aaaf-7ced8d419abd) created via admin center UI** (API role creation blocked on this org: entityprivileges rejected — "Invalid property 'entityprivileges' was found in entity 'Microsoft.Dynamics.CRM.role'").
+- **Role privileges SET via UI (admin center), all Organization level**: new_employees(Read), new_oncall/new_signin/new_training/new_site(C,R,W,D,A), new_requests(C,R,W,A), new_settings(R,W,A). **Verified persisted** via fresh grid reload (assigned-only filter) — NOTE: `$expand=entityprivileges` on `roles` RETURNS EMPTY on this org (broken expand; reads via API unreliable). Grid = ground truth.
+- **Role assignment to users: API blocked** (`systemuserroles` segment 404 both as collection and navigation; PATCH property rejected "Invalid property"; Organization.svc dead 302). Only admin center backend can write. → Assign via UI: environment **Users** page (pending).
+- **Ahmad H. Batawi (63021) added as env systemuser**: AhBatawi@ngrid.sa, id 21883605-ffc2-f111-aaaf-7ced8d419abd, enabled (created disabled by default; systemuser create needs businessunitid + internalemailaddress).
+- Roster→systemuser mapping done for 27 users (26 team + Batawi; Essam's user found by name: bf1bbd31-8b67-f111-ab0c-7c1e52fc03b7, domainname 70180@SEC.se.com.sa — roster primaryemail differs).
+- Browser driving: scratch Chrome profile copy + `--remote-debugging-port=9222` (Chrome 154 blocks debug port for default profile; scratch dir `C:\chrome-cdp\ud`). SPA routes flaky (deep links stall on "Loading"); UI-driven flow: list page renders → click role → editor. Real CDP mouse events required (synthetic clicks don't open Fluent dropdowns); CSS zoom 0.55 on root for off-screen grid cells; search input must be blurred before cell clicks; poll up to 4s for dropdown options.
+- PENDING: (1) assign role to 27 users via Users page, (2) SharePoint UI deployment (site URL still unknown), (3) map picker imagery dies on company PCs (external tiles) — acceptable.
