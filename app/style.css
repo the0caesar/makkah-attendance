@@ -184,3 +184,22 @@ table.grid.compact td { padding: 2px 3px; min-width: 34px; max-width: 48px; }
 table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
 table.grid th.wknd, table.grid td.wknd { background: rgba(255, 255, 255, 0.03); }
 table.grid.compact td.today-col { background: #19262e; }
+
+/* map picker (in-app Leaflet overlay) */
+#map-picker { position: fixed; inset: 0; z-index: 50; background: #0a1226; }
+#mp-map { position: absolute; inset: 0; }
+.mp-card {
+  position: absolute; top: 14px; left: 14px; z-index: 1000; width: 330px; max-width: calc(100vw - 28px);
+  background: var(--panel, #15234a); border: 1px solid var(--border, #24407c); border-radius: 14px;
+  padding: 18px 20px; box-shadow: 0 8px 28px rgba(0,0,0,.55); color: var(--text, #e8eefc);
+}
+.mp-card h1 { font-size: 17px; margin: 0 0 6px; }
+.mp-card .hint { font-size: 12.5px; color: var(--muted, #9fb0d8); margin-bottom: 10px; line-height: 1.45; }
+.mp-coord { font-size: 14px; font-weight: 700; color: var(--accent, #4cc2ff); margin-bottom: 8px; word-break: break-all; min-height: 0; }
+.mp-label { display: block; font-size: 12.5px; color: var(--muted, #9fb0d8); margin: 8px 0 3px; }
+.mp-label input { width: 100%; font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border, #24407c); background: #0a1226; color: var(--text, #e8eefc); box-sizing: border-box; }
+.mp-label input:focus { outline: none; border-color: var(--accent, #4cc2ff); }
+.mp-row { display: flex; gap: 8px; margin-top: 14px; }
+.mp-row .btn { flex: 1; }
+.leaflet-container { font-family: inherit; background: #0a1226; }

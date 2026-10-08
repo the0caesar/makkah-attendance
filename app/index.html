@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Protection Portal — Attendance & On-Call</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 </head>
 <body>
 <header>
@@ -137,6 +138,22 @@
 
 <div id="toast" class="toast" style="display:none"></div>
 
+<!-- MAP PICKER (in-app, Leaflet) -->
+<div id="map-picker" style="display:none">
+  <div id="mp-map"></div>
+  <div class="mp-card">
+    <h1>📍 Pick location</h1>
+    <div class="hint" id="mp-status">Click the map — or drag the pin — to the exact spot.</div>
+    <div class="mp-coord" id="mp-coord"></div>
+    <label class="mp-label">Name <input id="mp-name" type="text" maxlength="100" placeholder="Main office"></label>
+    <label class="mp-label">Radius (m) <input id="mp-radius" type="number" value="200" min="10" max="10000" step="10"></label>
+    <div class="mp-row">
+      <button id="mp-use" class="btn primary">Use this location</button>
+      <button id="mp-cancel" class="btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- AUTH (hidden unless needed) -->
 <section id="auth-screen" style="display:none;max-width:520px;margin:48px auto;padding:28px;border:1px solid var(--border,#333);border-radius:12px">
   <div id="auth-mode-login">
@@ -161,6 +178,7 @@
      builds: MSAL v5.25.0, teams-js v2.57.0 (UMD global: microsoftTeams). -->
 <script src="teams.js"></script>
 <script src="msal-browser.min.js"></script>
-<script src="app.js?v=20261008d"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js?v=20261008e"></script>
 </body>
 </html>

@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (map picker moved INSIDE the app)
+- **Report (Essam):** "make it open within the app — Send to portal opens the portal on another page where I can't sign in."
+- **Why it happened:** the picker's "Send" opened the app URL in a **second browser tab**, which needs a separate Microsoft sign-in. **Fix:** the map picker is now an **in-app Leaflet overlay** (Leaflet 1.9.4 loaded from CDN in index.html): new **🗺️ Pick on map** button in the Sites tab opens a full-screen map **inside the app** (no new page, no second sign-in) — click/drag pin (GPS auto-center when available, fallback Makkah), live radius circle, name + radius form, **"Use this location"** fills the site form right there → press **Add site**. Old 🌐 browser picker kept as fallback (only used if Leaflet fails to load in the Teams webview).
+- **Deploy:** cache-bust `?v=20261008e`. Verified live: index serves 20261008e + leaflet refs, app.js markers present, overlay CSS present, geo.html fallback 200. No worker change, no zip.
+
 ### 2026-10-08 (site picker: map + click + name + radius)
 - **Ask (Essam):** "make it open a map and I can click on the location, then right there name it and define the radius."
 - **Done:** `geo.html` is now a **Leaflet + OpenStreetMap picker** (no key/account, CDN 1.9.4): full-screen map, centers on GPS (fallback Makkah), **click or drag the pin**, **live radius circle** (follows the radius input), **name + radius form** right there, **Copy** + **"Send to Protection Portal →"** → `/app/?site=lat,lon&name=..&radius=..`. App boot hook extended: prefills lat/lon **and name and radius** → user just presses **Add site**.
