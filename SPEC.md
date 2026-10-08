@@ -295,6 +295,12 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (map picker: pin-lingers / won't-save fix)
+- **Ask (Essam):** "clicked on the map, it added a pin, I didn't name or save it, pin lingered, I tried to name it and save, it didn't save."
+- **Root cause:** in the all-sites map a bare map click made a pin but the button stayed "— select a site —" and the click went down the wrong path (form-fill for *new* sites — which only fills the form, doesn't save). Plus stale pins persisted between opens.
+- **Fix:** (1) fresh pin in the all-sites map → button becomes **"Add this site"** → one click POSTs the site directly (name optional) and returns to the overview with the new site on the map. (2) `clearMpPin()` on every open — no lingering pins. (3) a fresh map click exits edit mode (mpEdit=null) so you can't accidentally move a saved site when you meant to place a new pin. Refactored map creation into `ensureMpMap()` (single click-handler registration).
+- **Deploy:** frontend-only, cache-bust `?v=20261008k`. Verified live.
+
 ### 2026-10-08 (all-sites map)
 - **Ask (Essam):** "open the map that shows all saved sites and I can click on them to edit them."
 - **Done:** new **🗺️ All sites** button in the Sites tab — opens the same in-app satellite map with **every saved site**: named marker (disabled sites dimmed + labelled) + its **radius circle**, map auto-fits all sites. Click a **marker, its circle, or a name in the list** (scrollable list in the card — easier than tiny markers) → switches to **edit mode for that site** (pin there, name/radius pre-filled, "Save changes"). After saving it returns to the overview with fresh data.
