@@ -3,7 +3,7 @@
   "manifestVersion": "1.16",
   "id": "a6de80f6-8375-4ed1-9999-199d74a0a94a",
   "packageName": "com.ngrid.makkah.attendance",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "developer": {
     "name": "NGRID Protection Makkah",
     "websiteUrl": "https://www.ngrid.sa",
@@ -24,8 +24,9 @@
   },
   "accentColor": "#0D1630",
   "validDomains": [
-    "the0caesar.github.io",
-    "makkah-attendance-api.makkah-attendance-api.workers.dev"
+    "seccomsa.sharepoint.com",
+    "server.arcgisonline.com",
+    "tile.openstreetmap.org"
   ],
   "devicePermissions": [
     "geolocation"
@@ -33,7 +34,7 @@
   "staticTabs": [
     {
       "entityId": "makkah-attendance",
-      "contentUrl": "https://makkah-attendance-api.makkah-attendance-api.workers.dev/app",
+      "contentUrl": "https://seccomsa.sharepoint.com/sites/Prot_Mak/Shared%20Documents/SD%20ORDERS/ProtectionPortal.html",
       "scopes": [
         "team",
         "personal"
