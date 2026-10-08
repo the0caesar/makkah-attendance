@@ -295,6 +295,13 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (admin-only staff: Ahmad + Nabeel hidden from team)
+- **Ask (Essam):** "make him and nabeel just admins in the app without showing in the team."
+- **Constraint found:** adding a Dataverse column is BLOCKED on this org — `$metadata` POST rejects all non-JSON content types (415, tried application/xml, text/xml, atom+xml). No reusable bool field on `new_employees` either.
+- **Design:** worker-level registry: env var **`ADMIN_ONLY_NUMBERS="63021,68589"`** (wrangler vars) → `/api/roster` adds `admin_only: true` to those rows. Frontend: `visibleEmployees()` excludes them (grid week/month/year), Shifts + on-call person dropdowns exclude them; Admin → People keeps the full list with a **Team** column ("— admin only —"). Identity + admin access untouched (separate queries). `person()` stays full so name lookups still work.
+- **Management:** change the list = edit ADMIN_ONLY_NUMBERS + `wrangler deploy` (ask me). No in-app toggle (nowhere to persist one).
+- **Deploy:** worker 8876d828 + cache-bust `?v=20261008l`. Verified live: index 20261008l, 4 admin_only markers.
+
 ### 2026-10-08 (roster: 63021 Ahmad H. Batawi, admin)
 - **Ask (Essam):** "63021 can you add this as admin only?" → data: Ahmad H. Batawi, 63021@sec.se.com.sa (env acct), AhBatawi@ngrid.sa (Teams sign-in acct — same pattern as Essam's row).
 - **Done:** POSTed roster row: number 63021, `new_email`=63021@SEC.se.com.sa, `new_primaryemail`=AhBatawi@ngrid.sa, **admin=100000002**. 204 + read-back. Both sign-in paths resolve: 63021@... → number-match; AhBatawi@ngrid.sa → email-match. Roster now 27, admins now 5.

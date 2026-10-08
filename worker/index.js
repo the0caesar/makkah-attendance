@@ -237,9 +237,13 @@ async function handleApi(env, method, path, q, body, m) {
     const r = await call(env, "GET",
       "new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail,new_site_default,new_employees_isapprover&$orderby=new_fullname");
     if (r.status !== 200) return { error: "roster", code: r.status };
+    // admin-only staff: keep full roster access + admin, hidden from all team views.
+    // Managed via ADMIN_ONLY_NUMBERS env var (comma-separated employee numbers).
+    const adminOnly = new Set(String(env.ADMIN_ONLY_NUMBERS || "").split(",").map(s => s.trim()).filter(Boolean));
     return (r.body.value || []).map((x) => ({
       employee: x.new_employeenumber, name: x.new_fullname, email: x.new_primaryemail,
       site: x.new_site_default, is_approver: x.new_employees_isapprover === APPR_YES,
+      admin_only: adminOnly.has(String(x.new_employeenumber)),
     }));
   }
 

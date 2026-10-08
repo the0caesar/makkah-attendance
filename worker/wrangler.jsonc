@@ -12,6 +12,7 @@
     "DV_CLIENT_ID": "801c41a8-4d2d-48a6-a86e-f1bdc3c323e2",
     "AUTH_CLIENT_ID": "0cf32ba0-241d-4518-aa93-039664318a28",
     "AUTH_REDIRECT_URI": "https://the0caesar.github.io/makkah-attendance/",
-    "ALLOWED_ORIGIN": "https://the0caesar.github.io"
+    "ALLOWED_ORIGIN": "https://the0caesar.github.io",
+    "ADMIN_ONLY_NUMBERS": "63021,68589"
   }
 }
