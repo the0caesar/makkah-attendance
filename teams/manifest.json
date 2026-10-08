@@ -3,7 +3,7 @@
   "manifestVersion": "1.16",
   "id": "a6de80f6-8375-4ed1-9999-199d74a0a94a",
   "packageName": "com.ngrid.makkah.attendance",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "developer": {
     "name": "NGRID Protection Makkah",
     "websiteUrl": "https://www.ngrid.sa",
@@ -24,7 +24,8 @@
   },
   "accentColor": "#0D1630",
   "validDomains": [
-    "the0caesar.github.io"
+    "the0caesar.github.io",
+    "makkah-attendance-api.makkah-attendance-api.workers.dev"
   ],
   "devicePermissions": [
     "geolocation"
@@ -32,7 +33,7 @@
   "staticTabs": [
     {
       "entityId": "makkah-attendance",
-      "contentUrl": "https://the0caesar.github.io/makkah-attendance/?v=20261008a",
+      "contentUrl": "https://makkah-attendance-api.makkah-attendance-api.workers.dev/app",
       "scopes": [
         "team",
         "personal"
@@ -42,6 +43,6 @@
   ],
   "webApplicationInfo": {
     "id": "0cf32ba0-241d-4518-aa93-039664318a28",
-    "resource": "api://the0caesar.github.io/0cf32ba0-241d-4518-aa93-039664318a28"
+    "resource": "api://makkah-attendance-api.makkah-attendance-api.workers.dev/0cf32ba0-241d-4518-aa93-039664318a28"
   }
 }

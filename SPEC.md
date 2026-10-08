@@ -50,6 +50,7 @@ Teams tab (web app, static)  →  API proxy (CORS + geofence + RLS)  →  Datave
 ```
 
 - **Frontend:** plain HTML/JS/CSS single-page app → **GitHub Pages** ($0, LIVE at `the0caesar.github.io/makkah-attendance/`).
+- **Delivery / auto-refresh (2026-10-08, v1.0.6):** the Teams tab's `contentUrl` now points at the **Worker** (`...workers.dev/app`), which proxies the Pages files with `Cache-Control: no-cache, must-revalidate` (HTML) / `max-age=600` (assets). Result: **the tab always gets the current build the moment it's opened — no more new zips after v1.0.6.** The Pages site is the content origin; the Worker is the freshness gate. `webApplicationInfo.resource` + `validDomains` were moved to the workers.dev origin (SSO resource rule = iframe origin).
 - **API host: Cloudflare Worker (JS).** Verified 2026-10-07: Workers Free plan = 100k req/day, no credit card, 5 cron triggers (1-min min), 50 subrequests/req. Azure route is DEAD (no subscription). Worker = JS port of `api_core.py` (single source of truth for API logic). Local test: `npx wrangler dev` (Miniflare, no account needed).
 - **Why not Power Apps (VERIFIED 2026-10-07, was tentative before):**
   1. Probe app (1 button, no data source) proved users can run connector-less canvas apps for free (colleague tested OK).
@@ -293,6 +294,14 @@ A shift (per Essam) has at least:
 - **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-08 (auto-refresh delivery — last app install)
+- **Ask (Essam):** "can we make the app always refresh so we don't have to install it every time?" — YES.
+- **How:** the Teams tab's `contentUrl` now points at the **Worker** (`/app`), which serves the Pages files with **freshness headers** (index.html `no-cache, must-revalidate`; assets `max-age=600`). Teams always revalidates with the Worker → **every new build is live the moment the tab is opened**. GitHub Pages stays the content origin (Worker fetches it per request).
+- **Manifest v1.0.6 (LAST zip):** contentUrl → `https://makkah-attendance-api.makkah-attendance-api.workers.dev/app`; `webApplicationInfo.resource` + `validDomains` → workers.dev origin (SSO resource must match iframe origin). Worker `/app` route: allow-listed files only (`index.html/app.js/style.css/teams.js/msal-browser.min.js`), 404 otherwise.
+- **Standing rule (delivery):** **no more zips.** Frontend deploy = push Pages + done (tab picks it up on next open). Zips only if the delivery mechanism itself changes or SSO resource needs updating.
+- **Verified live:** `/app` → 200 + `no-cache` + current build (viewtoggle present); `/app/app.js` streams full file; `/health` OK.
+- **Note:** PKCE fallback (non-Teams browser login) may need the workers.dev origin added to the app registration's redirect URIs — Teams SSO (the normal path) is unaffected. Check only if someone opens the page outside Teams.
 
 ### 2026-10-08 (grid: week/month/year views + filter/sort toolbar)
 - **Ask (Essam):** can only see one week; wants **month** (all weeks of the month) and **year** (all months) views; and the grid should be **filterable + sortable** — e.g. "on a specific day, who is on vacation / on call / free".

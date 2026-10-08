@@ -771,6 +771,21 @@ export default {
     const cors = corsHeaders(env, req);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (url.pathname === "/health") return json({ ok: true, at: nowZ() }, 200, cors);
+    // /app/* — serves the web app from GitHub Pages with FRESHNESS headers, so the
+    // Teams tab always gets the latest build WITHOUT a new app install. HTML: no-cache
+    // (always revalidate); assets: short cache (the index.html cache-bust ?v= on
+    // app.js handles the rest). Content origin = the live Pages site.
+    if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
+      const name = url.pathname === "/app" ? "" : url.pathname.slice(5);
+      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true };
+      if (!ALLOWED[name]) return json({ error: "not found" }, 404, cors);
+      const f = await fetch(`https://the0caesar.github.io/makkah-attendance/${name}`, { cf: { cacheTtl: 0 } });
+      const h = new Headers(f.headers);
+      h.set("Cache-Control", name === "" || name === "index.html"
+        ? "no-cache, must-revalidate"
+        : "public, max-age=600");
+      return new Response(f.body, { status: f.status, headers: h });
+    }
     if (url.pathname === "/api/reminders/plan" && env.DEV_EMPLOYEE_NUMBER) {
       // dev dry-run: compute the plan with `?now=2026-10-08T04:05:00Z` (UTC), never sends
       const [sr, rr, qr, ar] = await Promise.all([
