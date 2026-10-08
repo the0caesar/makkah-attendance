@@ -110,21 +110,13 @@ function openMapPicker(site) {
     st.textContent = "Click the map — or drag the pin — to the exact spot.";
     st.className = "hint";
   }
-  if (!mpMap) {
-    mpMap = L.map("mp-map").setView([24.4686, 39.6142], 14); // Makkah
-    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: "Imagery © Esri, Maxar, Earthstar Geographics" });
-    const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { maxZoom: 19, attribution: "© OpenStreetMap contributors" });
-    L.control.layers({ "Satellite": sat, "Streets": streets }, null, { position: "topright" }).addTo(mpMap);
-    sat.addTo(mpMap);
-    mpMap.on("click", e => mpPlace(e.latlng.lat, e.latlng.lng, null));
-  }
+  ensureMpMap();
+  clearMpPin(); // no stale pins from the last time the map was open
   mpMap.invalidateSize();
   if (mpEdit) {
     // deterministic: open on the site itself (no GPS hunt while editing)
     mpMap.setView([parseFloat(mpEdit.lat), parseFloat(mpEdit.lon)], 16);
-    mpPlace(parseFloat(mpEdit.lat), parseFloat(mpEdit.lon), null);
+    mpPlace(parseFloat(mpEdit.lat), parseFloat(mpEdit.lon), null, true);
   } else if (navigator.geolocation) {
     // try GPS briefly (mobile works; Teams desktop hangs -> stays on Makkah, user clicks)
     navigator.geolocation.getCurrentPosition(
@@ -132,7 +124,13 @@ function openMapPicker(site) {
       () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 });
   }
 }
-function mpPlace(lat, lon, acc) {
+function clearMpPin() {
+  mpPos = null;
+  if (mpMarker && mpMap) { mpMap.removeLayer(mpMarker); mpMarker = null; }
+  if (mpCircle && mpMap) { mpMap.removeLayer(mpCircle); mpCircle = null; }
+}
+function mpPlace(lat, lon, acc, keepEdit) {
+  if (!keepEdit) mpEdit = null; // a fresh map click is not "editing"
   mpPos = { lat, lon };
   if (!mpMarker) {
     mpMarker = L.marker([lat, lon], { draggable: true }).addTo(mpMap);
@@ -141,6 +139,14 @@ function mpPlace(lat, lon, acc) {
   mpMap.panTo([lat, lon], { zoom: Math.max(mpMap.getZoom(), 16), animate: true });
   mpUpdate();
   if (acc != null) { const st = $("#mp-status"); st.textContent = "Accuracy ±" + Math.round(acc) + " m — drag the pin to fine-tune."; st.className = "hint"; }
+  if (!keepEdit) {
+    if (mpAll) {
+      $("#mp-use").textContent = "Add this site";
+      const st = $("#mp-status"); st.textContent = "New spot — name it (or leave it blank), then press Add this site."; st.className = "hint";
+    } else {
+      $("#mp-use").textContent = "Use this location";
+    }
+  }
 }
 function mpUpdate() {
   if (!mpPos) return;
@@ -151,6 +157,20 @@ function mpUpdate() {
 }
 async function useMapLocation() {
   if (!mpPos) { toast("Pick a spot on the map first", "err"); return; }
+  if (mpAll && !mpEdit) {
+    // all-sites map + fresh pin = add a new site directly, no form juggling
+    try {
+      await api("/api/admin/sites", { method: "POST", body: {
+        name: $("#mp-name").value || "Site",
+        latitude: mpPos.lat.toFixed(6), longitude: mpPos.lon.toFixed(6),
+        radius: parseInt($("#mp-radius").value, 10) || 200,
+      } });
+      toast("Site added");
+      await loadBase(); renderAdmin();
+      openSitesMap(); // back to the overview, new site on the map
+    } catch (e) { toast(e.message, "err"); }
+    return;
+  }
   if (mpEdit) {
     // editing a saved site: PATCH it directly
     try {
@@ -226,6 +246,7 @@ function openSitesMap() {
   list.style.display = (S.sites && S.sites.length) ? "block" : "none";
   list.querySelectorAll("button").forEach(b => b.addEventListener("click", () => startEditFromMap(S.sites[+b.dataset.i])));
   ensureMpMap();
+  clearMpPin(); // no stale pins left over from a previous open
   mpMap.invalidateSize();
   redrawSitesLayer();
 }
