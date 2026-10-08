@@ -460,34 +460,47 @@ function qpath(s) {
   return out;
 }
 async function dvCall(method, path, body) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!DV_TOKEN) DV_TOKEN = await acquireDvToken();
-    const url = DV_BASE + "/" + qpath(path);
-    const h = {
-      Authorization: "***" + DV_TOKEN,
-      Accept: "application/json",
-      "OData-MaxVersion": "4.0",
-      "OData-Version": "4.0",
-    };
-    const init = { method, headers: h };
-    if (body !== null && body !== undefined) {
-      h["Content-Type"] = "application/json; charset=utf-8";
-      init.body = JSON.stringify(body);
-    }
-    const resp = await fetch(url, init);
-    const t = await resp.text();
-    let j = null; try { j = t ? JSON.parse(t) : null; } catch { j = null; }
-    const hdrs = {}; resp.headers.forEach((v, k) => { hdrs[k] = v; });
-    const status = resp.ok ? 200 : resp.status;
-    if (status === 401 && attempt === 0) { // stale token — force refresh once
-      DV_TOKEN = null;
-      try { DV_TOKEN = await acquireDvToken(); } catch (e) { /* fall through to error */ }
-      continue;
-    }
-    return { status, body: j !== null ? j : (t || undefined), headers: hdrs };
+  // Power Automate flow middleman (SharePoint build): NO direct Dataverse (blocked,
+  // AADSTS650057). Sign-in CREATE -> the "signin" flow (server-side time-window HARD
+  // block); everything else -> the generic "proxy" flow (raw Dataverse passthrough).
+  // Returns the same {status, body, headers} shape the rest of the app expects.
+  const FLOW_PROXY  = "https://default22e3bb8f9a9648bd99f8f652d83d90.4c.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/911973361b67445099ff635f441a7f6c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=IbElkxDj2O96vlxmzRiLxB5V9Z1ZH4ICbuoi9NjCzkQ";
+  const FLOW_SIGNIN = "https://default22e3bb8f9a9648bd99f8f652d83d90.4c.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/18/workflows/7410fa41394649dfb00912ff721578d3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=a3QGOo4ijfnjmzx6TBZMOjmhAv1jb4bNKdi4dExkwVM";
+  let url, reqBody;
+  if (method === "POST" && path === "new_signins") {
+    // Translate the app's raw sign-in payload to the signin flow's contract.
+    const pay = body || {};
+    reqBody = { op: "signin",
+      user: { employeenumber: pay.new_signin_employeenumber || (typeof ME !== "undefined" && ME ? ME.employee_number : "") },
+      payload: {
+        direction: String(pay.new_signin_direction) === "100000002" ? "out" : "in",
+        allowed: String(pay.new_signin_allowed) === "100000001",
+        site: pay.new_signin_site || "",
+        lon: pay.new_signin_lonstr || "",
+        lat: pay.new_signin_latstr || "",
+        accuracy: pay.new_signin_accstr || "",
+        note: pay.new_signin_note || "",
+      } };
+    url = FLOW_SIGNIN;
+  } else {
+    reqBody = { method, path };
+    if (body !== null && body !== undefined) reqBody.body = body;
+    url = FLOW_PROXY;
   }
+  let resp;
+  try {
+    resp = await fetch(url, { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(reqBody) });
+  } catch (e) {
+    return { status: 0, body: { error: { code: "network", message: String(e) } }, headers: {} };
+  }
+  const t = await resp.text();
+  let j = null; try { j = t ? JSON.parse(t) : null; } catch { j = null; }
+  // Flows return the raw Dataverse result on 200 (GET: {value:[...]}, write: empty).
+  // No Location header is passed through, so callers fall back to re-fetch for ids.
+  return { status: resp.status, body: j !== null ? j : (t || undefined), headers: {} };
 }
-
 // ---------- picklist constants (verified 2026-10-07, SPEC.md §4) ----------
 const DIR_IN = 100000001, DIR_OUT = 100000002;
 const ALLOWED_YES = 100000001;
@@ -613,85 +626,39 @@ async function teamsContextEmail() {
     || (u.id && String(u.id).indexOf("@") >= 0 ? String(u.id) : null)
     || u.email || null;
 }
-// Full auth sequence. Resolves true when ME is ready; false when the page must
-// show the auth screen or navigate to AAD.
+// Full auth sequence (SharePoint build). Identity comes from the SharePoint session
+// (same-origin /_api/web/currentuser) — no MSAL / Teams SSO / Dataverse token needed
+// (all data goes through the Power Automate flows). Resolves truthy when ME is ready.
 async function ensureAuth() {
-  const inTeams = await teamsContextProbe();
-  if (inTeams) {
-    // Inside a real Teams webview: SSO id_token (identity) + SSO DV access token.
-    let email = null;
-    try { const t = await teamsSsoIdToken(); if (t) { ID_TOKEN = t; email = jwtEmail(t); } }
-    catch (e) { AUTH_ERR = "Teams SSO: " + ((e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e)); console.warn("Teams SSO failed:", e); }
-    if (!email) { try { email = await teamsContextEmail(); } catch (e) { } }
-    if (!email) { if (!AUTH_ERR) AUTH_ERR = "No Teams identity available (SSO and context both failed)"; return false; }
-    try {
-      DV_TOKEN = await acquireDvToken();
-      return await finishIdentity(email);
-    } catch (e) {
-      AUTH_ERR = "Dataverse token via Teams SSO failed: " + (e.message || String(e));
-      return false;
-    }
-  }
-  // Plain browser (SharePoint page, phone, desktop): MSAL redirect round trip.
-  const m = getMsal();
-  if (!m) { AUTH_ERR = "Login library not loaded"; return false; }
-  try { await m.initialize(); } catch (e) { /* non-fatal */ }
+  if (!API_BASE) return null;   // dev (no flow wiring)
+  let upn = null;
   try {
-    // 1) Returning from AAD with #code=... -> complete the round trip in-browser
-    //    (possible because the redirect URI is registered Mobile & desktop).
-    if (location.hash.includes("code=")) {
-      const res = await m.handleRedirectPromise();
-      if (res && res.accessToken) {
-        DV_TOKEN = res.accessToken;
-        ID_TOKEN = res.idToken || null;
-        history.replaceState(null, "", location.pathname + location.search);
-        const email = (ID_TOKEN && jwtEmail(ID_TOKEN)) || (res.account && res.account.username) || null;
-        return await finishIdentity(email);
-      }
-      AUTH_ERR = "sign-in round trip returned no token";
-      return false;
-    }
-    // 2) Silent (cached account/token from a previous visit)
-    const res = await m.acquireTokenSilent({ scopes: AUTH.scopes }).catch(() => null);
-    if (res && res.accessToken) {
-      DV_TOKEN = res.accessToken;
-      ID_TOKEN = res.idToken || null;
-      return await finishIdentity(jwtEmail(ID_TOKEN) || (res.account && res.account.username));
-    }
-    // 3) Fresh: redirect to AAD (clears stale interaction state first — MSAL v5
-    //    silently refuses a new loginRedirect while msal.interaction.status lingers)
-    try {
-      sessionStorage.removeItem("msal.interaction.status");
-      for (const k of Object.keys(sessionStorage)) {
-        if (k.startsWith("msal.") && (k.includes(".code.verifier") || k.includes(".request.origin") || k.includes(".request.params") || k.includes(".interaction.status"))) sessionStorage.removeItem(k);
-      }
-    } catch (e) { /* storage unavailable — proceed anyway */ }
-    m.loginRedirect({ scopes: AUTH.scopes }).catch(e => {
-      AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
-      showAuthScreen("login");
-    });
-    return false; // navigating away to AAD
-  } catch (e) {
-    AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
-    return false;
-  }
+    const r = await fetch("/_api/web/currentuser", { headers: { "Accept": "application/json;odata=nometadata" } });
+    if (!r.ok) { AUTH_ERR = "SharePoint identity: HTTP " + r.status; return null; }
+    const j = await r.json();
+    upn = j.LoginName || j.Email || null;
+  } catch (e) { AUTH_ERR = "SharePoint identity: " + String(e); return null; }
+  if (!upn) { AUTH_ERR = "SharePoint returned no identity"; return null; }
+  ID_TOKEN = upn;    // kept for any code that reads it
+  DV_TOKEN = null;   // no Dataverse token in this build
+  AUTH_ERR = null;
+  return await finishIdentity(upn) ? upn : null;
 }
 // Login button handler (auth screen)
 function pkceLogin() {
-  const inTeams = (navigator.userAgent || "").toLowerCase().includes("teams");
-  if (inTeams) { toast("Inside Teams you should be signed in automatically — reload the tab.", "err"); return; }
-  const m = getMsal();
-  if (!m) return toast("Login library not loaded", "err");
+  // SharePoint build: re-run the SharePoint identity (no MSAL redirect available).
   AUTH_ERR = null;
-  try {
-    m.loginRedirect({ scopes: AUTH.scopes }).catch(e => {
-      AUTH_ERR = (e && (e.errorCode ? e.errorCode + ": " + (e.errorMessage || "") : e.message)) || String(e);
+  toast("Retrying sign-in…");
+  ensureAuth().then(ok => {
+    if (ok) {
+      const el = $("#auth-screen"); if (el) el.style.display = "none";
+      const m = document.querySelector("main"); if (m) m.style.display = "";
+      const b = document.querySelector("header nav"); if (b) b.style.display = "";
+      refreshAll();
+    } else {
       showAuthScreen("login");
-    });
-  } catch (e) {
-    AUTH_ERR = e.message || String(e);
-    showAuthScreen("login");
-  }
+    }
+  });
 }
 function showAuthScreen(mode, email) {
   const el = $("#auth-screen");

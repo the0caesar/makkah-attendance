@@ -6,7 +6,7 @@
 > **DURABLE LOG (Essam's standing instruction, 2026-10-07):** EVERYTHING discussed or decided
 > about this app — requirements, corrections, design decisions, "refine later" items — gets logged
 > here (session log + relevant sections). Nothing app-related lives only in chat.
-> Last updated: **2026-10-08 (SharePoint single-file build complete + uploaded; live URL in SD ORDERS; Azure redirect step pending)**
+> Last updated: **2026-10-08 (Power Automate flow middleman: 12 flows built + verified; direct-Dataverse browser path proven DEAD; app rewiring to flow URLs in progress)**
 
 ## 1. Goal
 
@@ -63,6 +63,45 @@ Teams tab (web app, static)  →  API proxy (CORS + geofence + RLS)  →  Datave
 - **Identity (VERIFIED):** app.js currently has **no real login** (dev identity only) — build item. Plan: (a) Teams tab SSO via a NEW Entra app registration (separate from the Dataverse client-credentials one; `getAuthToken()` limited to openid/profile/email scopes = exactly what we need; user consent, no admin) + `webApplicationInfo{id, resource}` in manifest; (b) fallback MSAL.js PKCE login screen for any browser. Email → `new_employees.new_teams_email` (case-insensitive match, verified) → one-time link screen for unlinked users (spec-compliant fallback if tenant blocks user consent).
 - **Distribution:** custom Teams app zip (manifest + icon + app) → each person adds it to Teams once. **Tenant unknowns (test items):** (a) does SEC allow zip sideload? (b) does it allow user consent for app registrations? Fallbacks: "add website" tab / manual identity link.
 - **Reminders (VERIFIED pattern):** Power Automate **scheduled flow** (free in M365) → Dataverse connector (query `new_signin`/`new_settings`/roster) → "Post a message in a chat or channel" **as Flow bot → "chat with Flow bot" → recipient = person's email** = true 1:1 Teams message. No bot registration, no admin. Runs every N min; first at T−30, repeat every `reminder_interval_minutes`, stop after `reminder_stop_after_minutes`.
+
+### 3a. Power Automate flow middleman (2026-10-08 — SUPERSEDES "direct Dataverse" for the SharePoint build)
+
+**Direct browser → Dataverse is PROVEN DEAD:** AADSTS650057 (app registration `0cf32ba0…` not
+authorized for the Dataverse resource; no admin to fix; Azure portal disabled by IT). The
+"direct Dataverse + per-user MSAL" SharePoint build (previous §9 entry) cannot work on company
+PCs. Company firewall also allows `*.environment.api.powerplatform.com` (flow gateway) — used as the
+middleman. **Chain:**
+
+```
+SharePoint HTML (same-origin identity: /_api/web/currentuser → 70180@sec.se.com.sa)
+   → Power Automate HTTP-trigger flow (signed URL, trigger auth = None, no MSAL/Bearer)
+   → Dataverse (each flow mints its OWN S2S client-credentials token per run; token ~1h, flows never expire)
+```
+
+- **11 per-op flows** (`pp-op-*`, displayName "PP op <name>"): whoami, roster, settings, sites,
+  signins, oncall, training, signin, requests_get, requests_post, requests_update. **10/11 verified
+  end-to-end** (reads w/ real data; signin 403 hard-block outside window; requests create+reject
+  round-trip verified in Dataverse).
+- **1 generic proxy flow** (`pp-proxy`): body `{method, path, body}` → dynamic-method Dataverse
+  passthrough → raw result. Guard: **POST `new_signins` blocked** (must use the signin flow —
+  protects the server-side time-window hard block). Verified: site create/read/update/delete +
+  guard 403.
+- **App routing (the key insight):** the built app's entire data layer is ONE function,
+  `dvCall(method, path, body)` (a 1:1 worker port). Rewire: **everything → proxy**; **POST
+  `new_signins` → signin flow** with a contract translation in `dvCall` (app's raw `new_signin_*`
+  fields → flow's `{op, user:{employeenumber}, payload:{direction, allowed, site, lon, lat,
+  accuracy, note}}`). The signin flow keeps the **server-side time-window HARD block**
+  (450–930 min-of-day AST = 07:30–15:30, checked in-flow before write; 403 outside).
+- **Identity:** SharePoint `/_api/web/currentuser` → `LoginName` (`70180@sec.se.com.sa`) →
+  numeric-UPN roster match (existing `resolveMe`). **No MSAL, no Bearer, no OAuth in the page.**
+- **POST ids:** flows do NOT pass through the Dataverse `Location` header (gateway response is
+  wrapped); the app already degrades gracefully (empty id, re-fetches the list) — accepted for v1.
+- Signed URLs (long-lived) in `scratch/pp_portal_urls.json`; flow API token in
+  `scratch/good_token.txt` (SHORT-LIVED; see gotcha #32).
+- **Known v1 limitation:** admin log edit/delete of sign-in records (PATCH/DELETE
+  `new_signins(guid)`) is blocked by the proxy guard — deferred; needs a Flow-API token (delegated,
+  #32) to relax the guard or a small dedicated flow.
+- Reminders (Worker cron) are UNCHANGED by this — worker stays alive only for that.
 
 ### Project layout
 ```
@@ -245,6 +284,7 @@ A shift (per Essam) has at least:
 | 8 | Identity: Entra reg + SSO/PKCE in app.js | 🟡 LIVE, PENDING USER SIGN-IN | **Registration created by Essam 2026-10-07** (self-service worked for CREATE; VIEW/config still 401 — no role; client ID captured from paused screen-recording: **`0cf32ba0-241d-4518-aa93-039664318a28`**). **Verified from my side without portal access:** PKCE authorize probe (client + Web redirect `https://the0caesar.github.io/makkah-attendance/` + code_challenge) → AAD returned the sign-in page (no AADSTS error = client valid, redirect registered, public-client-flow accepted). **Cutover pushed to Pages:** `API_BASE` → live Worker + real client_id (verified live). **Headless click-through test:** live site → auth screen → click → AAD pre-fills `70180@sec.se.com.sa` → MFA code wall (expected; only user can complete). Manifest `webApplicationInfo{id, resource: api://<tenant>/<client>}` + zip rebuilt. **REMAINING:** Essam signs in once in his own browser (fresh session → should auto-pass) → SSO live-verified → sideload zip test |
 | 9 | Reminders | 🟡 LOCAL VERIFIED | **v1 = Worker cron + channel-webhook @mention** (§5.7): `reminderPlan()` pure + `scheduled()`; `test_reminders.mjs` 10/10 PASS (windows, 10-min boundaries, stop-after, latest-direction, vacation exclusion); live dry-run `/api/reminders/plan?now=2026-10-08T04:00:00Z` returned correct due list vs live data; `e2e_worker.sh` still 20/20. **REMAINING:** team creates channel incoming-webhook (30 s) → `wrangler secret put REMINDER_WEBHOOK_URL` → enable. 1:1 Flow-bot = v2 (tenant-dependent) |
 | 10 | Tenant tests + distribution | ⬜ LAST | sideload zip (Essam 1 min), SSO user-consent check, colleague end-to-end run |
+| 11 | **Power Automate flow middleman** (§3a) | 🟡 FLOWS DONE, APP REWIRE IN PROGRESS | **2026-10-08:** direct browser→Dataverse proven dead (AADSTS650057). Built via Flow API: 11 per-op flows (`pp-op-*`) + 1 generic proxy (`pp-proxy`, dynamic method, POST-new_signins guard). **10/11 per-op verified end-to-end** (real data; signin 403 hard-block; requests create→reject round-trip in Dataverse). Proxy verified: CRUD on `new_sites` + guard 403. App rewire (dvCall→flows, SharePoint identity) + HTML rebuild = in progress. Admin signins PATCH/DELETE deferred (proxy guard). Flow API needs DELEGATED token — S2S 401s (gotcha #32) |
 
 ### Dev environment facts
 - Proxy holds app credentials (from `dataverse.json`); browser never sees them.
@@ -280,6 +320,15 @@ A shift (per Essam) has at least:
 24. **String-key resource addressing FAILS in this org** — `new_signins('EMP • 2026-10-07 18:34 • OUT')` (quoted string key) → 400 "Error in query syntax", same as the GUID-quoted case (gotcha #11). Every entity here has a `<name>id` GUID key (`new_signinid`, `new_oncallid`, …) that IS the real primary key; the `*_name` column is a *display* string. **Address/PATCH/DELETE by the bare GUID** (`new_signins(guid)`), and filter by the display name with `$filter=... eq '…'` only to FIND the guid first. The old on-call delete used the string key → silently deleted nothing.
 25. **On-call lookups used `datetime'…'` literals + string-key deletes → both broken in this org (FIXED 2026-10-07).** The `new_oncall_date eq datetime'…T00:00:00Z'` filter (gotcha #14) 400s (parsed as Edm.String), so on-call assign pre-delete + remove never matched; combined with gotcha #24 the deletes no-op'd. Fix: raw unquoted ISO in the filter (`new_oncall_date eq 2026-10-07T00:00:00Z`) + `DELETE new_oncalls(guid)` by `new_oncallid`. Apply to all three on-call sites (assign pre-delete, remove, request-swap pre-delete).
 26. **`/api/signins` history window** was `?days=2` (only last 2 days) — too short for the admin Logs tab. Bumped to `?days=30` (Worker still caps `$top=500`). Side benefit: the grid now shows sign-in badges for past weeks when navigated.
+27. **Custom-entity OData fields are entity-prefixed; ID keys all lowercase.** Field = `new_<singular_logical_name>_<field>`: `new_requests_employeenumber` (NOT `new_employeenumber`), `new_oncall_date`, `new_training_startdate`/`new_training_enddate`, `new_requests_date` + `new_requests_date2` (start/end), `new_requests_status`/`_approver`/`_reason`/`_type`/`_name`. ID keys in `$select`/`$orderby` = ALL-LOWERCASE SchemaName: `new_oncallid`, `new_trainingid`, `new_requestsid`, `new_signinid` — neither `id` nor capital-I `new_oncallId` works (400 "Could not find a property").
+28. **`/EntityDefinitions` accepts NO query params** — `$select`/`$filter`/`$top` → 400. Bare GET returns all ~905 entities; filter client-side. `EntityDefinitions(LogicalName='new_x')/Attributes` works (full response: SchemaName + AttributeType + IsRequired).
+29. **`new_requests_requestedat` is empirically REQUIRED on create** even though metadata `IsRequired=false` (RequiredFieldValidator enforces it). POST without it → 400. Set an ISO timestamp.
+30. **Power Automate: `@{expr}` embedded in a LITERAL string URI hangs the flow FOREVER.** Run stays status "Running" with no action progress; gateway eventually 502 `NoResponse` after ~120 s (`ClientClosedRequest`). Fix: make the ENTIRE URI one full expression — `"uri": "@concat('https://…/entity(', triggerOutputs()?['body/id'], ')')"` (full-expression URIs and body values work fine). Recognize: 502 NoResponse + run stuck "Running" = expression-evaluation hang, not a Dataverse problem.
+31. **PA HTTP action: "A request body must not be included for 'GET' requests."** A `body` input on a GET → action fails (run goes to Failed). For a dynamic passthrough flow: the caller must OMIT the body key on GETs so `@triggerOutputs()?['body/body']` resolves to null → no body sent. POST/PATCH/DELETE fine with body.
+32. **Flow API (`api.flow.microsoft.com`) is NOT usable headless with S2S client credentials.** A client_credentials token (v1 or v2, aud=`https://service.flow.microsoft.com`) → 401 `ClientScopeAuthorizationFailed: "The x-ms-client-scope header must not be null or empty."` — the gateway STRIPS client-set `x-ms-client-scope` headers (tested: header value always "missing"). ⇒ flow create/update/DELETE requires a DELEGATED token from a logged-in Power Platform session (CDP Chrome port 9222, profile `C:\chrome-cdp\ud`) or the UI. The S2S creds in `dataverse.json` are Dataverse-scope only.
+33. **PA dynamic `method` on an HTTP action WORKS** — `"method": "@triggerOutputs()?['body/method']"` + full-expression URI verified live for GET/POST/PATCH/DELETE against Dataverse (proxy flow). So one passthrough flow can cover all verbs.
+34. **Flow trigger `triggerAuthenticationType: "None"` = long-lived signed URL** — `POST …/triggers/manual/listCallbackUrl` returns a stable `…/paths/invoke?…&sig=*** URL; the gateway handles CORS natively (`ACAO:*` on POST + OPTIONS preflight) — no flow-side CORS config, no MSAL/Bearer in the page.
+35. **Stuck "Running" flow runs** (gotcha #30) don't self-resolve and don't cause side effects (the Dataverse call never fired); they're harmless but accumulate in run history.
 
 ## 8b. BACKLOG (UI polish — deferred per Essam 2026-10-07)
 1. **Grid shows REJECTED requests as absence badges** (rejected vacation still visible on the calendar with "rejected"). Decide: grid should show approved absences only (+ optionally pending with a distinct marker). Filter lives in `requestsFor()` (app.js, currently excludes only cancelled).
@@ -294,6 +343,20 @@ A shift (per Essam) has at least:
 - **Time-window hard block** live (07:30–15:30 AST; reads configured shift_start/shift_end). **Number-match identity** live.
 
 ## 9. SESSION LOG (append-only, newest first)
+
+### 2026-10-08 (Power Automate flow middleman — flows built + verified; app rewire started)
+- **Situation:** the SharePoint "direct Dataverse + per-user MSAL" build is DEAD on company PCs (AADSTS650057 — the Entra app is not authorized for the Dataverse resource; no admin can fix it; Azure portal disabled). Chosen middleman (§3a): **Power Automate HTTP-trigger flows** on the reachable `*.environment.api.powerplatform.com` gateway, each minting its own S2S token per run (durable — no token-expiry problem), trigger auth `None` = long-lived signed URLs, gateway CORS handled natively.
+- **Built via Flow API** (`api.flow.microsoft.com`, flow token from the logged-in CDP Chrome session, port 9222): 11 per-op flows (`pp-op-*`) + 1 generic proxy (`pp-proxy`). Builders: `scratch/build_all_flows.py` (11 per-op), `scratch/build_proxy.py` (proxy). Signed URLs: `scratch/pp_portal_urls.json`.
+- **Root-caused + fixed 3 flow bugs (all verified after fix):**
+  1. **Wrong field names** — flows used generic names (`new_employeenumber`); real names are entity-prefixed + lowercase ID keys (gotcha #27). Pulled real schemas from bare `GET /EntityDefinitions` + `/Attributes` (gotcha #28).
+  2. **`new_requests_requestedat` missing on create** (gotcha #29).
+  3. **`requests_update` hung forever** — `@{triggerOutputs()…}` embedded in a literal URI string (gotcha #30). Fixed by full `@concat(...)` expression.
+- **Verified end-to-end (real Dataverse):** all 8 reads (whoami/roster/settings/sites/signins/oncall/training/requests — real data), signin 403 hard-block (19:40 AST, outside 450–930), requests create→reject→read-back (status 100000003 + approver 70180 confirmed in Dataverse; test record cleaned up). **10/11 per-op verified.**
+- **Proxy flow verified:** dynamic method works (gotcha #33) — POST/GET/PATCH/DELETE on `new_sites` round-trip OK; GET must omit body (gotcha #31); guard 403 on POST `new_signins` (protects the time-window hard block).
+- **KEY ARCHITECTURE INSIGHT (for the app rewire):** the built app's ENTIRE data layer is one function `dvCall(method, path, body)` (worker port) — so the app needs NO per-op flow calls: **everything → proxy; POST `new_signins` → signin flow** (contract translation: app's raw `new_signin_*` fields → `{op, user, payload:{direction, allowed, site, lon, lat, accuracy, note}}`). The signin flow's server-side 450–930 hard block is preserved. Identity: `/_api/web/currentuser` (LoginName → numeric-UPN roster match). No MSAL/Bearer in the page. POST id from Location header is unavailable (gateway wrap) — the app already degrades gracefully (empty id + list re-fetch).
+- **BLOCKER found (gotcha #32):** the Flow API 401s with S2S client-credentials tokens (`x-ms-client-scope` must be set by a trusted service; header stripped from external clients). ⇒ any FLOW CHANGE (e.g. relaxing the proxy guard for admin log edit/delete) needs a delegated token from the logged-in CDP Chrome session or the UI.
+- **Known v1 limitation (accepted):** admin log edit/delete of sign-in records blocked by the proxy guard (PATCH/DELETE `new_signins`); everything else (reads, sign-in, requests, admin sites/settings/oncall/employees) works via the proxy.
+- **IN PROGRESS at cutoff:** app rewire — replace `dvCall` (→ flows) + `ensureAuth` (→ SharePoint currentuser) in the built HTML, rebuild `deploy/sharepoint/ProtectionPortal.html`, upload to SharePoint, live test. Old `dvCall`/`ensureAuth` exact texts captured (app code = 1,815 lines, extracted to `scratch/app_built.js` for reference).
 
 ### 2026-10-08 (SharePoint single-file build + upload — WORKER RETIRED)
 - **Ask (Essam):** after "host it on SharePoint" was confirmed to act exactly like now, "go ahead just build it and let me know when you're done." Map imagery explicitly kept ("don't remove it yet").
