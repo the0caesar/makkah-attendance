@@ -295,6 +295,11 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (site delete: refresh bug)
+- **Report (Essam):** "I have to refresh the app for the deleted site to disappear."
+- **Root cause:** the delete handler called `refresh()` — which re-fetches grid data but NOT sites (sites come from `loadBase()`, only run on full reload). Every other site handler (add/toggle/radius) correctly does `loadBase(); renderAdmin();`. **Fix:** delete now does the same — deleted site disappears immediately, no app reload.
+- **Deploy:** cache-bust `?v=20261008h`. Verified live.
+
 ### 2026-10-08 (site delete)
 - **Ask (Essam):** "give me the option to delete sites."
 - **Done:** worker `DELETE /api/admin/sites/:id` → `DELETE new_sites(guid)` (proven live: fake-GUID probe returned Dataverse 404 = plumbing + permissions OK). Frontend: **Delete** button on every sites row, two-step confirm (native confirm() suppressed in Teams iframe; second click deletes + refresh). Tooltip warns people will stop signing in at a deleted site.
