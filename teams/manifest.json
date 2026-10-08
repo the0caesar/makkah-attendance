@@ -3,7 +3,7 @@
   "manifestVersion": "1.16",
   "id": "a6de80f6-8375-4ed1-9999-199d74a0a94a",
   "packageName": "com.ngrid.makkah.attendance",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "developer": {
     "name": "NGRID Protection Makkah",
     "websiteUrl": "https://www.ngrid.sa",
@@ -11,8 +11,8 @@
     "termsOfUseUrl": "https://www.ngrid.sa"
   },
   "name": {
-    "short": "Team Attendance",
-    "full": "Team Attendance & Requests"
+    "short": "Prot. Portal",
+    "full": "Protection Portal"
   },
   "description": {
     "short": "GPS sign-in/out, leave, on-call and shift approvals for the protection team.",
@@ -38,7 +38,7 @@
         "team",
         "personal"
       ],
-      "name": "Team Attendance"
+      "name": "Prot. Portal"
     }
   ],
   "webApplicationInfo": {

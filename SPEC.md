@@ -295,6 +295,13 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (rebrand: Protection Portal + shield/PMK icon)
+- **Ask (Essam):** name the app "Protection Portal"; logo = shield with "PMK" abbreviation.
+- **Manifest v1.0.7 (zip):** `name.full` = "Protection Portal"; `name.short` + tab name = "Prot. Portal" (**Teams hard limit: short/tab names ≤ 15 chars** — "Protection Portal" is 17, so the short forms carry the name). Icons replaced: **shield with PMK** on dark-navy (color.png 192² accent-blue shield + navy PMK; outline.png 32² white shield). Generator: `teams/make_icons_shield.py` (pure stdlib, no PIL — hand-drawn strokes; PMK reads clearly, lettering is casual/marker-style).
+- **Frontend (no zip — auto-refresh):** page title + header → "Protection Portal".
+- **Open option (needs Essam's call):** install Pillow (`pip install pillow`) to regenerate PMK in crisp Arial Bold instead of the hand-drawn strokes — his call (install rule).
+- Old icon generator kept at `teams/make_icons.py` (clock motif) in case we revert.
+
 ### 2026-10-08 (auto-refresh delivery — last app install)
 - **Ask (Essam):** "can we make the app always refresh so we don't have to install it every time?" — YES.
 - **How:** the Teams tab's `contentUrl` now points at the **Worker** (`/app`), which serves the Pages files with **freshness headers** (index.html `no-cache, must-revalidate`; assets `max-age=600`). Teams always revalidates with the Worker → **every new build is live the moment the tab is opened**. GitHub Pages stays the content origin (Worker fetches it per request).
