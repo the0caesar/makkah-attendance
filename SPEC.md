@@ -295,6 +295,12 @@ A shift (per Essam) has at least:
 
 ## 9. SESSION LOG (append-only, newest first)
 
+### 2026-10-08 (icon v2: bigger shield, Arial Black — v1.0.8)
+- **Ask (Essam):** "make the shield a little bit bigger and make it look nicer and use a different font. I don't like this font. It looks childish."
+- **Done:** `teams/make_icons_shield_v2.py` (Pillow, Hermes venv python — Pillow already in venv, no install). 4× supersampled LANCZOS. Shield 72% of tile, sharp crest corners, tight deliberate drop shadow, light 3px edge, Arial Black PMK at 90% shield width (navy on blue gradient). Two vision-critique rounds: 4/10 → 7/10 → "ship, comfortable margins, no unprofessional flaw".
+- **Manifest v1.0.8 (zip)** — icon swap only; names unchanged from v1.0.7.
+- Old generators kept: `make_icons.py` (clock), `make_icons_shield.py` (v1 hand-drawn PMK).
+
 ### 2026-10-08 (rebrand: Protection Portal + shield/PMK icon)
 - **Ask (Essam):** name the app "Protection Portal"; logo = shield with "PMK" abbreviation.
 - **Manifest v1.0.7 (zip):** `name.full` = "Protection Portal"; `name.short` + tab name = "Prot. Portal" (**Teams hard limit: short/tab names ≤ 15 chars** — "Protection Portal" is 17, so the short forms carry the name). Icons replaced: **shield with PMK** on dark-navy (color.png 192² accent-blue shield + navy PMK; outline.png 32² white shield). Generator: `teams/make_icons_shield.py` (pure stdlib, no PIL — hand-drawn strokes; PMK reads clearly, lettering is casual/marker-style).
