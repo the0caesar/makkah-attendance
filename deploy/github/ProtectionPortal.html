@@ -790,6 +790,17 @@ async function limitCheck(emp, dateIso, settings, excludeId) {
 async function handleApi(m, method, p, q, body) {
   const g = (k, dflt) => (q[k] ? q[k][0] : dflt);
 
+  if (p === "/api/whoami") {
+    return {
+      employee_number: m.employee_number,
+      name: m.name,
+      email: m.email,
+      is_approver: m.is_approver,
+      linked: m.linked !== false,
+      dev: false,
+    };
+  }
+
   if (p === "/api/roster") {
     const r = await dvCall("GET",
       "new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail,new_site_default,new_employees_isapprover&$orderby=new_fullname");
