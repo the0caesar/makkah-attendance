@@ -603,3 +603,20 @@ A shift (per Essam) has at least:
   - **Admin → Settings friendly names:** `SETTING_META` map renders each key as a plain label + hint (e.g. `shift_start` → "Shift window opens", `request_types` → "Allowed request types", `daily_limit` → "Daily absence limit"). **Storage keys unchanged** (backend reads them by exact name); raw key shown small under the label. Unknown keys fall back to the raw key.
 - **Live settings (2026-10-10):** shift 06:30–18:30 AST, `enforce_signout_location=1`, `daily_limit=2`, `request_types`=Vacation,Reset,Training,On-Call,Overtime,Call-Out,Work Comp,Training Comp, `absence_types`=Vacation,Reset,Training,Overtime,Call-Out, reminder 30/10/60, `rls_enabled=0`.
 - **Deploy:** app commit on `master`, copied to `index.html` on `main`, pushed; both live endpoints verified (marker "Shift window opens" present). Worker redeployed separately.
+
+### 2026-10-10 (settings UI rework: On/Off toggles + AM/PM time selectors)
+- **Ask (Essam):** "for any keys or settings that has one or zero, it should be on or off… for shift window opens/closes, let's not make it a text box, make it a selector with hours and minutes, PM and AM. I don't know about allowed request type — we will revisit later."
+- **Done (app-only, storage keys unchanged):**
+  - `META` now carries a `type`: `toggle` / `time` / `text`.
+  - **`toggle`** (`enforce_signout_location`, `rls_enabled` — the 1/0 keys): renders the existing `.switch` (On/Off) + colored state label; Save writes `"1"`/`"0"`.
+  - **`time`** (`shift_start`, `shift_end`): three `<select>`s — hour (1–12), minute (00–55 in 5s), AM/PM. Converts to 24h `HH:MM` on save (`fmtTime`), parses back on render (`parseTime`). Round-trip verified incl. 12 AM/12 PM edges (06:30, 18:30, 00:30, 12:00, 23:55 all OK).
+  - **`text`** (everything else, incl. `request_types`, `absence_types`, `daily_limit`, reminders): unchanged text box.
+- **Deferred (Essam):** `request_types` UX ("we will revisit later") — stays a comma-separated text box for now.
+- **Deploy:** commit on `master` (`9a7e41a`), copied to `index.html` on `main` (`36e0993`), pushed; both live endpoints verified (marker `st-time` present ×4 each).
+
+### 2026-10-10 (GitHub "select account" picker — root cause + fix)
+- **Symptom:** every `git push` popped a "Select an account" window (the0caesar vs `x-oauth-basic`), requiring Essam's click; background pushes (no TTY) hard-failed `could not read Username`.
+- **Root cause:** Git Credential Manager (2.7.3) held TWO candidate accounts for github.com — the real `the0caesar` plus a stale anonymous `x-oauth-basic` token (from legacy GCM 1.x `LegacyGeneric` credential entries) — so it prompted to disambiguate every auth.
+- **Fix:** `git credential erase` (protocol=https,host=github.com,username=x-oauth-basic) removed the stale token; deleted the legacy no-username entry via `cmdkey /Delete:LegacyGeneric:target=git:https://github.com`. GCM now lists **only** `the0caesar`.
+- **Anti-pattern avoided:** `GCM_INTERACTIVE=Never` looks like the obvious fix but is WRONG — it disables the only way GCM can disambiguate/refresh, so auth fails silently (`failed to execute prompt script`) and pushes break. Reverted (bashrc + `setx` + env).
+- **Verified:** `git credential fill` silent → `the0caesar`; `git push --dry-run` authenticates with no prompt. Remaining `GitHub for Visual Studio` credential is a different client (VS extension) — left untouched.
