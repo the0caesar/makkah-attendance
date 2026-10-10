@@ -129,7 +129,11 @@ function jwtEmail(req) {
   const a = req.headers.get("authorization") || "";
   const m = a.match(/^Bearer\s+(.+)$/i);
   if (!m) return null;
-  const parts = m[1].split(".");
+  const raw = m[1].trim();
+  // Plain email address (Teams-tab fallback: the Teams webview can't mint an SSO
+  // id token, so the app sends the context UPN directly as the Bearer value).
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return raw.toLowerCase();
+  const parts = raw.split(".");
   if (parts.length < 2) return null;
   try {
     const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));

@@ -621,6 +621,9 @@ function decodeIdTokenUpn(tok) {
 async function acquireIdentityToken() {
   const m = getMsal();
   if (!m) throw new Error("MSAL library not loaded");
+  // Consume a PKCE redirect response (page reloaded back with #code=) so the
+  // token is cached; no-op when there is no pending redirect.
+  try { await m.handleRedirectPromise(); } catch (e) { /* no pending redirect */ }
   const scopes = ["openid", "profile", "email"];
   try {
     const res = await m.acquireTokenSilent({ scopes });
