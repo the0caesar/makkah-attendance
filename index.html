@@ -2152,37 +2152,90 @@ function renderAdminPeople() {
 }
 function renderAdminSettings() {
   const el = $("#tab-settings");
-  // Friendly display names for the stored keys (the keys themselves are unchanged —
-  // the backend reads them by these exact names). Unknown keys fall back to the raw key.
+  // Friendly display names + input type per stored key. The storage keys themselves
+  // are unchanged — the backend reads them by these exact names.
   const META = {
-    shift_start: { label: "Shift window opens", hint: "24h time (AST). Sign-in and sign-out are blocked before this time. Example: 07:30" },
-    shift_end: { label: "Shift window closes", hint: "24h time (AST). Sign-in and sign-out are blocked after this time. Example: 15:30" },
-    enforce_signout_location: { label: "Require location to sign out", hint: "1 = required · 0 = optional. (Location is always required to sign in.)" },
-    request_types: { label: "Allowed request types", hint: "Comma-separated — these are the options people can request. Adding a new type here works with no code change." },
-    absence_types: { label: "Types that count against the daily limit", hint: "Comma-separated subset of the request types above." },
-    daily_limit: { label: "Daily absence limit", hint: "Maximum approved absences per employee per day (counting the types above)." },
-    reminder_lead_minutes: { label: "First reminder", hint: "Minutes before the shift window opens." },
-    reminder_interval_minutes: { label: "Reminder repeats every", hint: "Minutes between reminder pings." },
-    reminder_stop_after_minutes: { label: "Stop reminding after", hint: "Minutes after the reminder loop starts." },
-    rls_enabled: { label: "Row-level security", hint: "1 = people see only their own records · 0 = everyone sees team data." },
+    shift_start: { label: "Shift window opens", hint: "Sign-in and sign-out are blocked before this time (AST).", type: "time" },
+    shift_end: { label: "Shift window closes", hint: "Sign-in and sign-out are blocked after this time (AST).", type: "time" },
+    enforce_signout_location: { label: "Require location to sign out", hint: "Location is always required to sign in.", type: "toggle" },
+    request_types: { label: "Allowed request types", hint: "Comma-separated — these are the options people can request.", type: "text" },
+    absence_types: { label: "Types that count against the daily limit", hint: "Comma-separated subset of the request types above.", type: "text" },
+    daily_limit: { label: "Daily absence limit", hint: "Maximum approved absences per employee per day (counting the types above).", type: "text" },
+    reminder_lead_minutes: { label: "First reminder", hint: "Minutes before the shift window opens.", type: "text" },
+    reminder_interval_minutes: { label: "Reminder repeats every", hint: "Minutes between reminder pings.", type: "text" },
+    reminder_stop_after_minutes: { label: "Stop reminding after", hint: "Minutes after the reminder loop starts.", type: "text" },
+    rls_enabled: { label: "Row-level security", hint: "On = people see only their own records · Off = everyone sees team data.", type: "toggle" },
   };
+  // 24h "HH:MM" <-> 12h {h12, min, mer}
+  function parseTime(v) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || "").trim());
+    if (!m) return { h12: 7, min: "30", mer: "AM" };
+    let h = parseInt(m[1], 10); const min = m[2];
+    const mer = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return { h12: h, min, mer };
+  }
+  function fmtTime(h12, min, mer) {
+    let h = parseInt(h12, 10) % 12;
+    if (mer === "PM") h += 12;
+    return String(h).padStart(2, "0") + ":" + min;
+  }
+  const HOURS = [...Array(12)].map((_, i) => i + 1);
+  const MIN_OPTS = (extra) => {
+    const set = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"];
+    if (extra && !set.includes(extra)) set.push(extra);
+    return set.sort();
+  };
+  const opt = (val, cur, txt) => `<option value="${val}"${val === cur ? " selected" : ""}>${txt ?? val}</option>`;
+
   const rows = Object.entries(S.settings).map(([k, v]) => {
-    const m = META[k] || { label: k, hint: "" };
+    const m = META[k] || { label: k, hint: "", type: "text" };
+    let valCell;
+    if (m.type === "toggle") {
+      const on = String(v) === "1";
+      valCell = `<span class="switch${on ? " on" : ""}" data-toggle="${esc(k)}" style="cursor:pointer"></span>
+        <span class="toggle-state" style="margin-left:8px;font-weight:600;color:${on ? "var(--green)" : "var(--muted)"}">${on ? "On" : "Off"}</span>`;
+    } else if (m.type === "time") {
+      const t = parseTime(v);
+      valCell = `<select class="st-time" data-part="h12" data-name="${esc(k)}">${HOURS.map(h => opt(h, t.h12)).join("")}</select>
+        <select class="st-time" data-part="min" data-name="${esc(k)}">${MIN_OPTS(t.min).map(x => opt(x, t.min)).join("")}</select>
+        <select class="st-time" data-part="mer" data-name="${esc(k)}">${["AM", "PM"].map(x => opt(x, t.mer)).join("")}</select>`;
+    } else {
+      valCell = `<input class="st-val" data-name="${esc(k)}" value="${esc(v)}" style="width:260px">`;
+    }
     return `<tr>
     <td><b>${esc(m.label)}</b>${m.hint ? `<br><span class="hint">${esc(m.hint)}</span>` : ""}<br><span style="font-size:11px;color:var(--muted);opacity:.6">stored as: ${esc(k)}</span></td>
-    <td><input class="st-val" data-name="${esc(k)}" value="${esc(v)}" style="width:260px"></td>
+    <td>${valCell}</td>
     <td><button class="btn" data-save="${esc(k)}">Save</button></td>
   </tr>`;
   }).join("");
   el.innerHTML = `
-  <div class="hint" style="margin-bottom:10px">Team rules — changes apply to the very next sign-in/request. Times are 24h AST (e.g. 07:30).</div>
+  <div class="hint" style="margin-bottom:10px">Team rules — changes apply to the very next sign-in/request. Times are AST.</div>
   <table><tr><th>Setting</th><th>Value</th><th></th></tr>${rows}</table>`;
+
+  // Toggles: click flips the visual state (saved via the Save button)
+  el.querySelectorAll("[data-toggle]").forEach(sw => sw.addEventListener("click", () => {
+    sw.classList.toggle("on");
+    const st = sw.parentElement.querySelector(".toggle-state");
+    const on = sw.classList.contains("on");
+    st.textContent = on ? "On" : "Off";
+    st.style.color = on ? "var(--green)" : "var(--muted)";
+  }));
   el.querySelectorAll("[data-save]").forEach(btn => btn.addEventListener("click", async () => {
     const name = btn.dataset.save;
-    const val = el.querySelector(`.st-val[data-name="${name}"]`).value;
+    const meta = META[name] || { type: "text", label: name };
+    let val;
+    if (meta.type === "toggle") {
+      val = el.querySelector(`.switch[data-toggle="${name}"]`)?.classList.contains("on") ? "1" : "0";
+    } else if (meta.type === "time") {
+      const g = p => el.querySelector(`.st-time[data-name="${name}"][data-part="${p}"]`).value;
+      val = fmtTime(g("h12"), g("min"), g("mer"));
+    } else {
+      val = el.querySelector(`.st-val[data-name="${name}"]`).value;
+    }
     try {
       await api("/api/admin/settings", { method: "POST", body: { name, value_str: val } });
-      toast(`Saved: ${(META[name] || {}).label || name}`); await loadBase();
+      toast(`Saved: ${meta.label || name}`); await loadBase();
     } catch (e) { toast(e.message, "err"); }
   }));
 }
