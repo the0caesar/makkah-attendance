@@ -525,32 +525,12 @@ function hhmmToMin(s) {
 async function resolveMe(email) {
   email = (email || "").trim().toLowerCase();
   if (!email) return null;
-  // Primary: the sign-in UPN embeds the employee number (70180@SEC.se.com.sa -> 70180).
-  const local = String(email).split("@")[0].trim();
-  if (/^\d+$/.test(local)) {
-    const r = await dvCall("GET",
-      `new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail,new_employees_isapprover&$filter=new_employeenumber eq '${local}'`);
-    const row = (r.status === 200 && isObj(r.body) && (r.body.value || [])[0]) || null;
-    if (row && row.new_fullname) {
-      return {
-        employee_number: local, email, name: row.new_fullname,
-        is_approver: row.new_employees_isapprover === APPR_YES, linked: true, dev: false,
-      };
-    }
-  }
-  // Last resort: exact email match.
-  const r2 = await dvCall("GET",
-    "new_employeeses?$select=new_employeenumber,new_fullname,new_primaryemail,new_employees_isapprover");
-  if (r2.status === 200 && isObj(r2.body)) {
-    for (const row of r2.body.value || []) {
-      if (String(row.new_primaryemail || "").toLowerCase() === email) {
-        return {
-          employee_number: String(row.new_employeenumber), email, name: row.new_fullname,
-          is_approver: row.new_employees_isapprover === APPR_YES, linked: true, dev: false,
-        };
-      }
-    }
-  }
+  // Identity via the Worker: it decodes our JWT -> roster match -> m (full ME shape:
+  // employee_number, email, name, is_approver, linked, dev). No flows involved.
+  try {
+    const m = await api("/api/whoami");
+    if (m && m.employee_number) return m;
+  } catch (e) { /* 403 (not on roster) or 401 (no token) -> fall through to unlinked */ }
   return { unlinked: true, email };
 }
 async function finishIdentity(email) {
@@ -656,12 +636,13 @@ async function ensureAuth() {
   if (!API_BASE) return null;   // dev (no flow wiring)
   if (AUTH.client_id.startsWith("REPLACE_")) return ID_TOKEN; // registration not created yet
   let upn = null;
+  let rawTok = null;
   const inTeams = await teamsContextProbe();
   if (inTeams) {
     // Inside a real Teams webview: SSO id token first, then Teams-injected identity.
     try {
-      const tok = await teamsSsoIdToken();
-      if (tok) upn = decodeIdTokenUpn(tok);
+      rawTok = await teamsSsoIdToken();
+      if (rawTok) upn = decodeIdTokenUpn(rawTok);
     } catch (e) {
       AUTH_ERR = "Teams SSO: " + ((e && (e.errorDescription || e.errorMessage || e.errorCode || e.message)) || String(e));
     }
@@ -669,13 +650,13 @@ async function ensureAuth() {
   } else {
     // Plain browser: MSAL PKCE (redirect round trip).
     try {
-      const tok = await acquireIdentityToken();
-      if (tok) upn = decodeIdTokenUpn(tok);
+      rawTok = await acquireIdentityToken();
+      if (rawTok) upn = decodeIdTokenUpn(rawTok);
     } catch (e) { AUTH_ERR = "MSAL: " + ((e && e.error) || String(e)); }
   }
   if (!upn) { AUTH_ERR = AUTH_ERR || "no identity returned"; return null; }
-  ID_TOKEN = upn;    // kept for any code that reads it
-  DV_TOKEN = null;   // no Dataverse token in this build (data via flows)
+  ID_TOKEN = rawTok || upn;  // raw MSAL/SSO JWT (Worker decodes it for identity); fall back to upn
+  DV_TOKEN = null;
   AUTH_ERR = null;
   return await finishIdentity(upn) ? upn : null;
 }
@@ -1169,32 +1150,27 @@ async function handleApi(m, method, p, q, body) {
   return [{ error: "not found: " + p }, 404];
 }
 
-// The one function every UI screen calls. Local router: same surface as the old
-// worker API (path + method + JSON body), but everything runs against Dataverse
-// with the current user's token.
+// The one function every UI screen calls. Routes to the Cloudflare Worker
+// (server-side Dataverse, direct S2S) — the original architecture. The Worker
+// decodes our MSAL JWT (Authorization header) -> roster match -> identity, and
+// performs the Dataverse op server-side. No Power Automate flows involved.
 async function api(path, opts = {}) {
-  const u = new URL("https://local.local" + path);
-  const q = {};
-  u.searchParams.forEach((v, k) => { (q[k] = q[k] || []).push(v); });
-  if (!ME) {
-    const e = new Error("unauthorized: sign in with your work account");
-    e.code = 401;
+  const h = {};
+  if (opts.body) h["Content-Type"] = "application/json";
+  if (ID_TOKEN) h["Authorization"] = "Bearer " + ID_TOKEN;
+  const r = await fetch(API_BASE + path, {
+    method: opts.method || "GET",
+    headers: Object.keys(h).length ? h : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let j = {};
+  try { j = await r.json(); } catch (e) { }
+  if (!r.ok || j.error) {
+    const e = new Error(j.error || ("HTTP " + r.status));
+    e.code = r.status; e.detail = j;
     throw e;
   }
-  let body = null;
-  if (opts.body) body = opts.body;
-  const p = u.pathname.replace(/\/+$/, "");
-  const res = await handleApi(ME, opts.method || "GET", p, q, body);
-  const isTuple = Array.isArray(res) && res.length === 2 && typeof res[1] === "number";
-  if (isTuple) {
-    if (res[1] !== 200) {
-      const e = new Error(res[0].error || "error");
-      e.code = res[1]; e.detail = res[0];
-      throw e;
-    }
-    return res[0];
-  }
-  return res;
+  return j;
 }
 
 // ====== kept helpers (identical to app.js) ======
