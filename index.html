@@ -1643,9 +1643,15 @@ function gridRows() {
   if (q) rows = rows.filter(p => (p.name || "").toLowerCase().includes(q) || String(p.employee).toLowerCase().includes(q));
   if (S.gt.status !== "all") rows = rows.filter(p => statusMatch(p, S.gt.date || todayISO()));
   const s = S.gt.sort;
-  return [...rows].sort((a, b) => s === "name-desc" ? b.name.localeCompare(a.name)
+  const sorted = [...rows].sort((a, b) => s === "name-desc" ? b.name.localeCompare(a.name)
     : s === "emp" ? String(a.employee).localeCompare(String(b.employee), undefined, { numeric: true })
     : a.name.localeCompare(b.name));
+  // The signed-in user's row is always pinned first — everyone else keeps the chosen sort.
+  if (S.me) {
+    const i = sorted.findIndex(p => p.employee === S.me.employee_number);
+    if (i > 0) { const [me] = sorted.splice(i, 1); sorted.unshift(me); }
+  }
+  return sorted;
 }
 // status of one person on one date (for the status filter)
 function statusMatch(p, date) {
@@ -2204,40 +2210,64 @@ function renderAdminSettings() {
       valCell = `<input class="st-val" data-name="${esc(k)}" value="${esc(v)}" style="width:260px">`;
     }
     return `<tr>
-    <td><b>${esc(m.label)}</b>${m.hint ? `<br><span class="hint">${esc(m.hint)}</span>` : ""}<br><span style="font-size:11px;color:var(--muted);opacity:.6">stored as: ${esc(k)}</span></td>
+    <td><b>${esc(m.label)}</b><span class="st-dirty" data-dot="${esc(k)}" style="margin-left:8px"></span>${m.hint ? `<br><span class="hint">${esc(m.hint)}</span>` : ""}<br><span style="font-size:11px;color:var(--muted);opacity:.6">stored as: ${esc(k)}</span></td>
     <td>${valCell}</td>
-    <td><button class="btn" data-save="${esc(k)}">Save</button></td>
   </tr>`;
   }).join("");
   el.innerHTML = `
-  <div class="hint" style="margin-bottom:10px">Team rules — changes apply to the very next sign-in/request. Times are AST.</div>
-  <table><tr><th>Setting</th><th>Value</th><th></th></tr>${rows}</table>`;
+  <div class="hint" style="margin-bottom:10px">Team rules — changes apply from the very next sign-in/request. Times are AST. <b>Nothing is saved until you press “Save all”.</b></div>
+  <table><tr><th>Setting</th><th>Value</th></tr>${rows}</table>
+  <div style="display:flex;gap:10px;margin-top:16px;align-items:center">
+    <button class="btn" id="st-save" style="background:var(--green);color:#06210f;font-weight:700;padding:9px 22px">Save all</button>
+    <button class="btn" id="st-cancel">Cancel / Revert</button>
+    <span id="st-status" class="hint"></span>
+  </div>`;
 
-  // Toggles: click flips the visual state (saved via the Save button)
+  // Read a setting's current (possibly edited) value from the UI.
+  const valOf = (k, meta) => {
+    if (meta.type === "toggle") return el.querySelector(`.switch[data-toggle="${k}"]`)?.classList.contains("on") ? "1" : "0";
+    if (meta.type === "time") { const g = p => el.querySelector(`.st-time[data-name="${k}"][data-part="${p}"]`).value; return fmtTime(g("h12"), g("min"), g("mer")); }
+    return el.querySelector(`.st-val[data-name="${k}"]`).value;
+  };
+  const isDirty = k => String(S.settings[k]) !== valOf(k, META[k] || { type: "text" });
+  const refreshDirty = () => {
+    let n = 0;
+    for (const k of Object.keys(S.settings)) {
+      const dot = el.querySelector(`[data-dot="${k}"]`);
+      const d = isDirty(k);
+      if (d) n++;
+      if (dot) dot.innerHTML = d ? '<span style="color:var(--accent,#e8a33d);font-weight:700">●</span> <span class="hint">unsaved</span>' : "";
+    }
+    el.querySelector("#st-status").textContent = n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "All changes saved";
+  };
+
+  // Toggles: click flips the visual state (persisted only via Save all)
   el.querySelectorAll("[data-toggle]").forEach(sw => sw.addEventListener("click", () => {
     sw.classList.toggle("on");
     const st = sw.parentElement.querySelector(".toggle-state");
     const on = sw.classList.contains("on");
     st.textContent = on ? "On" : "Off";
     st.style.color = on ? "var(--green)" : "var(--muted)";
+    refreshDirty();
   }));
-  el.querySelectorAll("[data-save]").forEach(btn => btn.addEventListener("click", async () => {
-    const name = btn.dataset.save;
-    const meta = META[name] || { type: "text", label: name };
-    let val;
-    if (meta.type === "toggle") {
-      val = el.querySelector(`.switch[data-toggle="${name}"]`)?.classList.contains("on") ? "1" : "0";
-    } else if (meta.type === "time") {
-      const g = p => el.querySelector(`.st-time[data-name="${name}"][data-part="${p}"]`).value;
-      val = fmtTime(g("h12"), g("min"), g("mer"));
-    } else {
-      val = el.querySelector(`.st-val[data-name="${name}"]`).value;
-    }
+  el.querySelectorAll(".st-val").forEach(inp => inp.addEventListener("input", refreshDirty));
+  el.querySelectorAll(".st-time").forEach(sel => sel.addEventListener("change", refreshDirty));
+
+  // Global save: push every changed setting in one go.
+  el.querySelector("#st-save").addEventListener("click", async () => {
+    const changed = Object.keys(S.settings).filter(isDirty);
+    if (!changed.length) { toast("No changes to save"); return; }
     try {
-      await api("/api/admin/settings", { method: "POST", body: { name, value_str: val } });
-      toast(`Saved: ${meta.label || name}`); await loadBase();
+      for (const k of changed) {
+        await api("/api/admin/settings", { method: "POST", body: { name: k, value_str: valOf(k, META[k] || { type: "text" }) } });
+      }
+      toast(`Saved ${changed.length} setting${changed.length > 1 ? "s" : ""}`);
+      await loadBase();
     } catch (e) { toast(e.message, "err"); }
-  }));
+  });
+  // Cancel / Revert: drop unsaved edits, re-render from the last-saved values.
+  el.querySelector("#st-cancel").addEventListener("click", () => renderAdminSettings());
+  refreshDirty();
 }
 
 // ---------- sign in / out ----------
