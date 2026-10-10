@@ -168,6 +168,16 @@ a:hover { text-decoration: underline; }
 .toast.err { border-color: var(--red); color: var(--red); }
 .toast.ok { border-color: var(--green); color: var(--green); }
 
+/* big confirm alert (sign-in blocks etc.) — no native dialogs (blocked in Teams iframe) */
+.alert-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.alert-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; max-width: 460px; width: calc(92vw - 24px); padding: 30px 28px 26px; box-shadow: 0 24px 70px rgba(0,0,0,.65); text-align: center; }
+.alert-icon { font-size: 42px; line-height: 1; margin-bottom: 12px; }
+.alert-title { font-size: 21px; font-weight: 800; margin-bottom: 10px; }
+.alert-title.err { color: var(--red); }
+.alert-msg { font-size: 15.5px; line-height: 1.55; color: var(--muted); margin-bottom: 24px; white-space: pre-wrap; word-break: break-word; }
+.alert-btn { background: var(--accent); color: #101010; font-weight: 700; font-size: 15px; padding: 11px 34px; border-radius: 8px; cursor: pointer; border: 0; }
+.alert-btn:hover { filter: brightness(1.12); }
+
 /* grid views + toolbar (week / month / year) */
 .viewtoggle { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .viewtoggle button { background: var(--panel); border: 0; color: var(--muted); padding: 5px 10px; font-size: 12px; cursor: pointer; }
@@ -1190,6 +1200,46 @@ function toast(msg, kind = "ok") {
   clearTimeout(t._h);
   t._h = setTimeout(() => (t.style.display = "none"), 4000);
 }
+// Big confirm alert (in-page — native dialogs are suppressed inside the Teams iframe).
+function showAlert(title, msg, icon = "⛔") {
+  let ov = $("#alert-overlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "alert-overlay";
+    ov.className = "alert-overlay";
+    ov.innerHTML = `<div class="alert-card">
+      <div class="alert-icon"></div>
+      <div class="alert-title"></div>
+      <div class="alert-msg"></div>
+      <button class="alert-btn">OK</button>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", e => { if (e.target === ov) closeAlert(); });
+    ov.querySelector(".alert-btn").addEventListener("click", closeAlert);
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeAlert(); });
+  }
+  ov.querySelector(".alert-icon").textContent = icon;
+  const t = ov.querySelector(".alert-title");
+  t.textContent = title;
+  t.className = "alert-title" + (icon === "⛔" ? " err" : "");
+  ov.querySelector(".alert-msg").textContent = msg;
+  ov.style.display = "flex";
+  ov.querySelector(".alert-btn").focus();
+}
+function closeAlert() { const ov = $("#alert-overlay"); if (ov) ov.style.display = "none"; }
+// Human-readable sign-in/sign-out block reasons.
+function humanizeSignError(e) {
+  const msg = String((e && e.message) || e || "unknown error");
+  if (/outside work hours/i.test(msg)) return msg;
+  if (/outside allowed locations/i.test(msg)) return msg.replace(/^blocked:\s*/i, "");
+  if (/location required/i.test(msg)) return "A location is required — sign-in couldn't use your position. Try again.";
+  if (/timed out/i.test(msg)) return "Your device didn't return a location in time. Make sure location is enabled and you have signal (or use the location helper), then try again.";
+  if (/permission denied/i.test(msg)) return "Location permission is denied. Allow location access for this page in your browser, then try again.";
+  if (/position unavailable|gps off/i.test(msg)) return "No location fix — GPS off or weak signal? Move near a window/outside, or use the location helper, then try again.";
+  if (/not supported here/i.test(msg)) return "This device/browser doesn't support location — use the location helper below the sign-in buttons.";
+  if (/unauthorized|sign in with your work account/i.test(msg)) return "You're not signed in — sign in at the top of the app, then try again.";
+  return "Something went wrong: " + msg;
+}
 let ID_TOKEN = null; // JWT (SSO id_token or PKCE id_token) sent to the API as Bearer
 function jwtEmail(token) {
   try {
@@ -2102,38 +2152,73 @@ function renderAdminPeople() {
 }
 function renderAdminSettings() {
   const el = $("#tab-settings");
-  const rows = Object.entries(S.settings).map(([k, v]) => `<tr>
-    <td><b>${esc(k)}</b></td>
-    <td><input class="st-val" data-name="${esc(k)}" value="${esc(v)}" style="width:220px"></td>
+  // Friendly display names for the stored keys (the keys themselves are unchanged —
+  // the backend reads them by these exact names). Unknown keys fall back to the raw key.
+  const META = {
+    shift_start: { label: "Shift window opens", hint: "24h time (AST). Sign-in and sign-out are blocked before this time. Example: 07:30" },
+    shift_end: { label: "Shift window closes", hint: "24h time (AST). Sign-in and sign-out are blocked after this time. Example: 15:30" },
+    enforce_signout_location: { label: "Require location to sign out", hint: "1 = required · 0 = optional. (Location is always required to sign in.)" },
+    request_types: { label: "Allowed request types", hint: "Comma-separated — these are the options people can request. Adding a new type here works with no code change." },
+    absence_types: { label: "Types that count against the daily limit", hint: "Comma-separated subset of the request types above." },
+    daily_limit: { label: "Daily absence limit", hint: "Maximum approved absences per employee per day (counting the types above)." },
+    reminder_lead_minutes: { label: "First reminder", hint: "Minutes before the shift window opens." },
+    reminder_interval_minutes: { label: "Reminder repeats every", hint: "Minutes between reminder pings." },
+    reminder_stop_after_minutes: { label: "Stop reminding after", hint: "Minutes after the reminder loop starts." },
+    rls_enabled: { label: "Row-level security", hint: "1 = people see only their own records · 0 = everyone sees team data." },
+  };
+  const rows = Object.entries(S.settings).map(([k, v]) => {
+    const m = META[k] || { label: k, hint: "" };
+    return `<tr>
+    <td><b>${esc(m.label)}</b>${m.hint ? `<br><span class="hint">${esc(m.hint)}</span>` : ""}<br><span style="font-size:11px;color:var(--muted);opacity:.6">stored as: ${esc(k)}</span></td>
+    <td><input class="st-val" data-name="${esc(k)}" value="${esc(v)}" style="width:260px"></td>
     <td><button class="btn" data-save="${esc(k)}">Save</button></td>
-  </tr>`).join("");
+  </tr>`;
+  }).join("");
   el.innerHTML = `
-  <div class="hint" style="margin-bottom:10px">Data-driven rules. <b>request_types</b> = allowed request types (add new ones here — no code change). <b>absence_types</b> = types counted against the daily limit. Times are HH:MM AST.</div>
-  <table><tr><th>Key</th><th>Value</th><th></th></tr>${rows}</table>`;
+  <div class="hint" style="margin-bottom:10px">Team rules — changes apply to the very next sign-in/request. Times are 24h AST (e.g. 07:30).</div>
+  <table><tr><th>Setting</th><th>Value</th><th></th></tr>${rows}</table>`;
   el.querySelectorAll("[data-save]").forEach(btn => btn.addEventListener("click", async () => {
     const name = btn.dataset.save;
     const val = el.querySelector(`.st-val[data-name="${name}"]`).value;
     try {
       await api("/api/admin/settings", { method: "POST", body: { name, value_str: val } });
-      toast(`Saved ${name}`); await loadBase();
+      toast(`Saved: ${(META[name] || {}).label || name}`); await loadBase();
     } catch (e) { toast(e.message, "err"); }
   }));
 }
 
 // ---------- sign in / out ----------
+function hhmmMin(v) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || "").trim()); return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null; }
+function astMinutesNow() {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  return parseInt(p.find(x => x.type === "hour").value, 10) * 60 + parseInt(p.find(x => x.type === "minute").value, 10);
+}
 async function doSign(direction) {
   const btn = direction === "in" ? $("#btn-signin") : $("#btn-signout");
+  const verb = direction === "in" ? "Sign-in" : "Sign-out";
   btn.disabled = true;
   try {
-    const g = await getLocation();
+    // Pre-check the shift window (same settings the server enforces) — instant,
+    // unambiguous block instead of a 15 s GPS wait that ends in "Timed out".
+    const s = S.settings || {};
+    const ws = hhmmMin(s.shift_start), we = hhmmMin(s.shift_end);
+    if (ws != null && we != null) {
+      const nm = astMinutesNow();
+      if (nm < ws || nm > we) {
+        showAlert(verb + " blocked",
+          `Outside work hours.\nThe shift window is ${s.shift_start}–${s.shift_end} AST — it's now ${Math.floor(nm / 60)}:${String(nm % 60).padStart(2, "0")} AST. Try again inside the window.`);
+        return;
+      }
+    }
     toast("Checking location…");
+    const g = await getLocation();
     const r = await api("/api/signin", { method: "POST", body: {
       direction, latitude: g.lat, longitude: g.lon, accuracy: g.acc,
     } });
     toast(direction === "in" ? `Signed in ✓ ${r.site}` : `Signed out ✓ ${r.site}`);
     await refresh();
   } catch (e) {
-    toast(`${direction === "in" ? "Sign-in" : "Sign-out"} blocked: ${e.message}`, "err");
+    showAlert(verb + " blocked", humanizeSignError(e));
   } finally { btn.disabled = false; }
 }
 
