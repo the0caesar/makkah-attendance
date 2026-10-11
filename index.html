@@ -205,6 +205,10 @@ table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
 table.grid th.wknd, table.grid td.wknd { background: rgba(255, 255, 255, 0.03); }
 table.grid.compact td.today-col { background: #19262e; }
 
+/* sites tab: total count + row numbers */
+.sites-count { margin: 8px 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.rownum { width: 36px; text-align: center; color: var(--muted) !important; }
+
 /* map picker (in-app Leaflet overlay) */
 #map-picker { position: fixed; inset: 0; z-index: 50; background: #0a1226; }
 #mp-map { position: absolute; inset: 0; }
@@ -1933,21 +1937,20 @@ function renderAdminSites() {
     <label>Latitude <input id="sf-lat" type="number" step="any" required></label>
     <label>Longitude <input id="sf-lon" type="number" step="any" required></label>
     <label>Radius (m) <input id="sf-radius" type="number" value="200" required></label>
-    <button class="btn ghost" type="button" id="sf-geo-map">🗺️ Pick on map</button>
     <button class="btn ghost" type="button" id="sf-geo-all">🗺️ All sites</button>
-    <button class="btn ghost" type="button" id="sf-geo">📍 My location</button>
-    <a class="btn ghost" id="sf-geo-browser" href="https://makkah-attendance-api.makkah-attendance-api.workers.dev/app/geo.html" target="_blank" title="Fallback: opens the map picker in your browser">🌐 Open in browser</a>
     <button class="btn primary" type="submit">Add site</button>
   </form>
-  <table><tr><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th></tr>
-  ${S.sites.map(s => `<tr>
+  <div class="sites-count">Total: ${S.sites.length} site(s)</div>
+  <table><tr><th class="rownum">#</th><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th><th></th></tr>
+  ${S.sites.map((s, i) => `<tr>
+    <td class="rownum">${i+1}</td>
     <td><b>${esc(s.name)}</b>${s.note ? `<div class="m" style="color:var(--muted);font-size:11px">${esc(s.note)}</div>` : ""}</td>
     <td>${s.lat}</td><td>${s.lon}</td>
     <td><input class="si-radius" data-id="${s.id}" value="${s.radius}" type="number" style="width:80px"></td>
     <td><span class="switch ${s.enabled ? "on" : ""}" data-id="${s.id}" data-on="${s.enabled}"></span></td>
     <td><button class="btn sm" data-site-map="${s.id}">🗺️ Map</button></td>
     <td><button class="btn danger sm" data-site-del="${s.id}">Delete</button></td>
-  </tr>`).join("") || '<tr><td colspan="7">No sites yet — add one above (📍 fills your current location).</td></tr>'}
+  </tr>`).join("") || '<tr><td colspan="8">No sites yet — add one above.</td></tr>'}
   </table>`;
   $$("#tab-sites [data-site-map]").forEach(b => b.addEventListener("click", () => {
     const s = S.sites.find(x => x.id === b.dataset.siteMap);
@@ -1967,20 +1970,10 @@ function renderAdminSites() {
     b.title = "Click again to delete this site — people will stop signing in here";
     setTimeout(() => { delete b.dataset.arm; b.textContent = old; b.title = ""; }, 3500);
   }));
-  $("#sf-geo-map").addEventListener("click", openMapPicker);
   $("#sf-geo-all").addEventListener("click", openSitesMap);
   $("#mp-use").addEventListener("click", useMapLocation);
   $("#mp-cancel").addEventListener("click", cancelMapPicker);
   $("#mp-radius").addEventListener("input", mpUpdate);
-  $("#sf-geo").addEventListener("click", async () => {
-    try {
-      const g = await getLocation(6000); // short timeout: Teams desktop hangs (no GPS there)
-      $("#sf-lat").value = g.lat.toFixed(6); $("#sf-lon").value = g.lon.toFixed(6);
-      toast(`Location captured: ${g.lat.toFixed(4)}, ${g.lon.toFixed(4)} (±${Math.round(g.acc)}m)`);
-    } catch (e) {
-      toast("Location not readable inside Teams — use 🌐 Get location from browser (opens a helper page in your browser).", "err");
-    }
-  });
   $("#site-form").addEventListener("submit", async e => {
     e.preventDefault();
     try {
