@@ -1894,7 +1894,7 @@ function reqRowHTML(r, isMine) {
         ? `<button class="btn danger" data-act="cancel">Cancel</button>` : ""}
       ${S.me.is_approver && r.status === ST.requested
         ? `<button class="btn ok" data-act="approve">Approve</button><button class="btn danger" data-act="reject">Reject</button>` : ""}
-      ${S.me.is_approver && (r.status === ST.approved || r.status === ST.rejected)
+      ${S.me.is_approver && (r.status === ST.approved || r.status === ST.rejected || Number(r.status) === ST.cancelled)
         ? `<button class="btn ghost sm" data-act="edit">✏️ Edit</button><button class="btn danger sm" data-act="delete">Delete</button>` : ""}
     </div>
   </div>`;
@@ -1978,7 +1978,12 @@ function renderApprovals() {
     ? pending.map(r => reqRowHTML(r, false)).join("")
     : '<div class="hint">Nothing pending 🎉</div>';
   const cutoff = isoDate(addDays(new Date(), -7));
-  const decided = S.requests.filter(r => (r.status === ST.approved || r.status === ST.rejected) && (r.decidedat || "") >= cutoff);
+  const decided = S.requests.filter(r => {
+    const st = Number(r.status);
+    if (st !== ST.approved && st !== ST.rejected && st !== ST.cancelled) return false;
+    const at = r.decidedat || r.requestedat || r.date || "";
+    return at >= cutoff;
+  });
   $("#decided-list").innerHTML = decided.length
     ? decided.map(r => reqRowHTML(r, false)).join("")
     : '<div class="hint">Nothing decided this week.</div>';
