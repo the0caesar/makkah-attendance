@@ -1285,6 +1285,11 @@ function getLocation(ms = 15000) {
 
 // ---------- map picker (in-app Leaflet overlay; no separate page, no second sign-in) ----------
 let mpMap = null, mpMarker = null, mpCircle = null, mpPos = null, mpEdit = null, mpSitesLayer = null, mpAll = false; // mpEdit = site object when editing a saved site; mpAll = all-sites map mode
+// Custom pin icon (inline SVG) — avoids the missing marker-icon.png (broken-image glyph)
+function sitePinIcon(color) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))"><path fill="${color}" stroke="#fff" stroke-width="1.4" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>`;
+  return L.divIcon({ className: "site-pin", html: svg, iconSize: [36, 36], iconAnchor: [18, 34], tooltipAnchor: [0, -30] });
+}
 function openMapPicker(site) {
   if (!window.L) { toast("Map couldn't load inside the app — use 🌐 Open in browser instead.", "err"); return; }
   mpEdit = site || null;
@@ -1329,7 +1334,7 @@ function mpPlace(lat, lon, acc, keepEdit) {
   if (!keepEdit) mpEdit = null; // a fresh map click is not "editing"
   mpPos = { lat, lon };
   if (!mpMarker) {
-    mpMarker = L.marker([lat, lon], { draggable: true }).addTo(mpMap);
+    mpMarker = L.marker([lat, lon], { draggable: true, icon: sitePinIcon("#ff5a5a") }).addTo(mpMap);
     mpMarker.on("dragend", () => { const p = mpMarker.getLatLng(); mpPos = { lat: p.lat, lon: p.lng }; mpUpdate(); });
   } else mpMarker.setLatLng([lat, lon]);
   mpMap.panTo([lat, lon], { zoom: Math.max(mpMap.getZoom(), 16), animate: true });
@@ -1413,7 +1418,7 @@ function redrawSitesLayer() {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     L.circle([lat, lon], { radius: s.radius || 200, color: "#4cc2ff", weight: 1.5, fillOpacity: 0.1 })
       .addTo(mpSitesLayer).on("click", () => startEditFromMap(s));
-    L.marker([lat, lon], { draggable: false, opacity: s.enabled === false ? 0.45 : 1 })
+    L.marker([lat, lon], { draggable: false, opacity: s.enabled === false ? 0.45 : 1, icon: sitePinIcon(s.enabled === false ? "#8a8a8a" : "#22c55e") })
       .addTo(mpSitesLayer)
       .bindTooltip((s.name || "Site") + (s.enabled === false ? " (disabled)" : ""), { permanent: true, direction: "top", offset: [0, -26] })
       .on("click", () => startEditFromMap(s));
@@ -1456,7 +1461,7 @@ function startEditFromMap(site) {
   st.textContent = `Editing: ${site.name || "site"} — move the pin or adjust the radius, then Save changes.`;
   st.className = "hint";
   if (!mpMarker) {
-    mpMarker = L.marker([mpPos.lat, mpPos.lon], { draggable: true }).addTo(mpMap);
+    mpMarker = L.marker([mpPos.lat, mpPos.lon], { draggable: true, icon: sitePinIcon("#ff5a5a") }).addTo(mpMap);
     mpMarker.on("dragend", () => { const p = mpMarker.getLatLng(); mpPos = { lat: p.lat, lon: p.lng }; mpUpdate(); });
   } else mpMarker.setLatLng([mpPos.lat, mpPos.lon]);
   mpMap.panTo([mpPos.lat, mpPos.lon], Math.max(mpMap.getZoom(), 15));
@@ -1493,11 +1498,13 @@ function latestSigninToday(emp) {
   return S.signins.find(x => x.employee === emp && (x.at || "").slice(0, 10) === todayISO());
 }
 function requestsFor(emp, date) {
-  return S.requests.filter(r =>
-    r.employee === emp &&
-    r.date <= date &&
-    (r.date2 || r.date) >= date &&
-    r.status !== 100000004 && r.status !== 100000003); // cancelled & rejected: not active, hidden from grid
+  return S.requests.filter(r => {
+    const st = Number(r.status);
+    return r.employee === emp &&
+      r.date <= date &&
+      (r.date2 || r.date) >= date &&
+      st !== 100000004 && st !== 100000003; // cancelled & rejected: not active, hidden from grid
+  });
 }
 const ST = { requested: 100000001, approved: 100000002, rejected: 100000003, cancelled: 100000004 };
 const stName = v => (["", "requested", "approved", "rejected", "cancelled"][v / 100000000 - 99999999] || String(v));
@@ -1528,7 +1535,10 @@ async function refresh() {
     const l = new Date(Date.UTC(ws.getFullYear(), ws.getMonth() + 1, 0));
     from = isoDate(addDays(f, -1)); to = isoDate(addDays(l, 1));
   } else {
-    from = isoDate(addDays(ws, -1)); to = isoDate(addDays(ws, 8));
+    // week view: fetch the whole month so requests in other weeks of the month still load
+    const wf = new Date(Date.UTC(ws.getFullYear(), ws.getMonth(), 1));
+    const wl = new Date(Date.UTC(ws.getFullYear(), ws.getMonth() + 1, 0));
+    from = isoDate(addDays(wf, -1)); to = isoDate(addDays(wl, 1));
   }
   const [oc, reqs, sig, tr] = await Promise.all([
     api(`/api/oncall?from=${from}&to=${to}`),
@@ -1712,7 +1722,7 @@ function cellYear(emp, y, m) {
   if (ocDays) out.push(`<span class="chip c-oncall" title="On-call days in ${MONTHS[m - 1]}">${ocDays} OC</span>`);
   const counts = {};
   for (const r of S.requests) {
-    if (r.employee !== emp || r.status === ST.cancelled) continue;
+    if (r.employee !== emp || Number(r.status) === ST.cancelled || Number(r.status) === ST.rejected) continue;
     const a = r.date, b = r.date2 || r.date;
     if (a <= last && b >= first) counts[r.type] = (counts[r.type] || 0) + 1;
   }
@@ -1884,6 +1894,8 @@ function reqRowHTML(r, isMine) {
         ? `<button class="btn danger" data-act="cancel">Cancel</button>` : ""}
       ${S.me.is_approver && r.status === ST.requested
         ? `<button class="btn ok" data-act="approve">Approve</button><button class="btn danger" data-act="reject">Reject</button>` : ""}
+      ${S.me.is_approver && (r.status === ST.approved || r.status === ST.rejected)
+        ? `<button class="btn ghost sm" data-act="edit">✏️ Edit</button><button class="btn danger sm" data-act="delete">Delete</button>` : ""}
     </div>
   </div>`;
 }
@@ -1893,6 +1905,26 @@ function wireReqRows() {
     row.querySelectorAll("[data-act]").forEach(btn => btn.addEventListener("click", async () => {
       const act = btn.dataset.act;
       try {
+        if (act === "delete") {
+          if (!btn.dataset.arm) {
+            btn.dataset.arm = "1";
+            const old = btn.textContent;
+            btn.textContent = "Confirm?";
+            btn.title = "Click again to delete this request";
+            setTimeout(() => { delete btn.dataset.arm; btn.textContent = old; btn.title = ""; }, 3500);
+            return;
+          }
+          delete btn.dataset.arm;
+          await api(`/api/requests/${id}`, { method: "DELETE" });
+          toast("Request deleted");
+          await refresh();
+          return;
+        }
+        if (act === "edit") {
+          const req = S.requests.find(x => x.id === id);
+          if (req) openEditModal(req);
+          return;
+        }
         const r = await api(`/api/requests/${id}`, { method: "PATCH", body: { action: act } });
         toast(act === "cancel" ? (r.notify_supervisors ? "Cancelled — supervisors will be notified." : "Request cancelled.") : `Request ${act}d.`);
         if (act === "cancel" && r.notify_supervisors) {
@@ -1901,6 +1933,41 @@ function wireReqRows() {
         await refresh();
       } catch (e) { toast(e.message, "err"); }
     }));
+  });
+}
+// Small edit modal (prompt() is unreliable in the Teams iframe)
+function openEditModal(req) {
+  const TYPES = ["Vacation", "Reset", "Training", "Overtime", "Call-Out", "On-Call"];
+  const old = document.querySelector("#edit-modal");
+  if (old) old.remove();
+  const div = document.createElement("div");
+  div.id = "edit-modal";
+  div.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px";
+  div.innerHTML = `<form id="edit-modal-form" style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;width:100%;max-width:420px">
+    <div style="font-weight:700;margin-bottom:10px">Edit request</div>
+    <label>Type <select name="type">${TYPES.map(t => `<option ${t === req.type ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label>Start date <input name="date" type="date" value="${req.date}" required></label>
+    <label>End date <input name="date2" type="date" value="${req.date2 || ""}"></label>
+    <label>Reason <input name="reason" type="text" value="${esc(req.reason || "")}"></label>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn primary" type="submit">Save</button>
+      <button class="btn ghost" type="button" id="edit-modal-cancel">Cancel</button>
+    </div>
+  </form>`;
+  document.body.appendChild(div);
+  div.addEventListener("click", e => { if (e.target === div) div.remove(); });
+  document.getElementById("edit-modal-cancel").addEventListener("click", () => div.remove());
+  document.getElementById("edit-modal-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    const body = { type: f.type.value, date: f.date.value, date2: f.date2.value || null, reason: f.reason.value.trim() };
+    if (body.date2 && body.date2 < body.date) return toast("End date before start date", "err");
+    try {
+      await api(`/api/requests/${req.id}`, { method: "PATCH", body });
+      toast("Request updated");
+      div.remove();
+      await refresh();
+    } catch (err) { toast(err.message, "err"); }
   });
 }
 
