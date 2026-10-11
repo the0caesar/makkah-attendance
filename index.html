@@ -1931,6 +1931,10 @@ function renderAdmin() {
 }
 function renderAdminSites() {
   const el = $("#tab-sites");
+  const sitesArr = [...(S.sites || [])];
+  if (S.sitesSort === "asc") sitesArr.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  else if (S.sitesSort === "desc") sitesArr.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }));
+  const sortInd = S.sitesSort === "asc" ? " \u2191" : S.sitesSort === "desc" ? " \u2193" : "";
   el.innerHTML = `
   <form class="inline-form" id="site-form">
     <label>Name <input id="sf-name" required maxlength="100" placeholder="Main office"></label>
@@ -1941,8 +1945,8 @@ function renderAdminSites() {
     <button class="btn primary" type="submit">Add site</button>
   </form>
   <div class="sites-count">Total: ${S.sites.length} site(s)</div>
-  <table><tr><th class="rownum">#</th><th>Site</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th><th></th></tr>
-  ${S.sites.map((s, i) => `<tr>
+  <table><tr><th class="rownum">#</th><th id="th-site-sort" style="cursor:pointer" title="Click to sort by name">Site${sortInd}</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th><th></th></tr>
+  ${sitesArr.map((s, i) => `<tr>
     <td class="rownum">${i+1}</td>
     <td><b>${esc(s.name)}</b>${s.note ? `<div class="m" style="color:var(--muted);font-size:11px">${esc(s.note)}</div>` : ""}</td>
     <td>${s.lat}</td><td>${s.lon}</td>
@@ -1952,6 +1956,11 @@ function renderAdminSites() {
     <td><button class="btn danger sm" data-site-del="${s.id}">Delete</button></td>
   </tr>`).join("") || '<tr><td colspan="8">No sites yet — add one above.</td></tr>'}
   </table>`;
+  const thSort = $("#th-site-sort");
+  if (thSort) thSort.addEventListener("click", () => {
+    S.sitesSort = S.sitesSort == null ? "asc" : S.sitesSort === "asc" ? "desc" : null;
+    renderAdminSites();
+  });
   $$("#tab-sites [data-site-map]").forEach(b => b.addEventListener("click", () => {
     const s = S.sites.find(x => x.id === b.dataset.siteMap);
     if (s) openMapPicker(s);
