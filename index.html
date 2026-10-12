@@ -488,6 +488,7 @@ table.grid.compact td.today-col { background: #19262e; }
 
 </script>
 <script src="jspdf.umd.min.js"></script>
+<script src="dom-to-image-more.min.js"></script>
 <script>
 /* Team Pulse — Makkah Protection Team attendance app
    All API calls go to /api/* (proxy). See SPEC.md for the data model. */
@@ -2610,134 +2611,83 @@ function promptSignature(direction) {
 }
 async function regPdf() {
   if (!S_reg) return toast("Load a day first", "err");
-  if (typeof jspdf === "undefined" || !window.jspdf || !window.jspdf.jsPDF) return toast("PDF engine not loaded", "err");
+  if (!window.jspdf || !window.jspdf.jsPDF) return toast("PDF engine not loaded", "err");
+  if (typeof window.domtoimage === "undefined") return toast("PDF image engine not loaded", "err");
   const { jsPDF } = window.jspdf;
-  toast("Building PDF…");
-  // A4 portrait — the Excel template is a portrait RTL sheet
-  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const W = 595, H = 842;
-  // Embed Amiri (Regular + Bold) — the template is in Arabic. Fallback to Helvetica if fonts fail.
-  const loadFont = async (file, name, style) => {
+  toast("Building PDF\u2026");
+  const T_TITLE = "سجل توقيع الحضور اليومي لموظفي دائرة الحماية والإختبارات";
+  const T_DAY = "اليوم :";
+  const T_DATE = "التاريخ :";
+  const T_VAC = "إجازة";
+  const T_REVIEW = "يحتاج مراجعة";
+  const T_HEADS = ["الاسم", "القسم", "الرقم الوظيفي", "الموقع", "وقت الحضور", "توقيع الحضور", "وقت الانصراف", "توقيع اللانصراف", "ملاحظات"];
+  (async () => {
+    let node = null;
     try {
-      const fr = await fetch(file);
-      if (!fr.ok) return false;
-      const buf = new Uint8Array(await fr.arrayBuffer());
-      let bin = ""; for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 8192));
-      doc.addFileToVFS(file, btoa(bin));
-      doc.addFont(file, name, style);
-      return true;
-    } catch (e) { console.warn("font load failed", file, e); return false; }
-  };
-  const F_REG = await loadFont("arabic.ttf", "Amiri", "normal");
-  const F_BOLD = await loadFont("amiri-bold.ttf", "Amiri", "bold");
-  const setAR = (size, bold) => {
-    doc.setFontSize(size);
-    if (F_REG) {
-      if (bold) { if (F_BOLD) { try { doc.setFont("Amiri", "bold"); return; } catch (e) { /* fall through */ } } doc.setFont("Amiri", "normal"); return; }
+      const d = S_reg.date;
+      const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
+      const siBy = {}, soBy = {};
+      for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
+      const rows = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
+      const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
+      const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
+      const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
+      const headRow = "<tr><th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("") + "</tr>";
+      const bodyRows = rows.map((p, i) => {
+        const e = String(p.employee); const isVac = vacSet.has(e);
+        const si = siBy[e], so = soBy[e]; const needsReview = !isVac && !(!!si && si.allowed);
+        const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
+        const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
+        const rem = S_reg.remarks[e];
+        const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
+        const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
+        return "<tr>" +
+          "<td>" + (i + 1) + "</td>" +
+          "<td>" + esc(p.name) + "</td>" +
+          "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
+          "<td>" + esc(e) + "</td>" +
+          "<td>" + esc(p.site || "\u2014") + "</td>" +
+          '<td class="ltr">' + (si ? esc(fmtClock(si.at)) : "") + "</td>" +
+          "<td>" + sig(sigIn) + "</td>" +
+          '<td class="ltr">' + (so ? esc(fmtClock(so.at)) : "") + "</td>" +
+          "<td>" + sig(sigOut) + "</td>" +
+          '<td class="ltr">' + note + "</td>" +
+          "</tr>";
+      }).join("");
+      const pageCss = "#pdfpage td,#pdfpage th{border:1px solid #222;padding:3px 5px;text-align:center;vertical-align:middle}#pdfpage th{font-weight:bold;background:#f4f4f4}#pdfpage td.ltr{direction:ltr}#pdfpage .sigimg{max-height:30px;max-width:100%;display:block;margin:0 auto}";
+      const pageHtml = '<div id="pdfpage" dir="rtl" style="position:fixed;left:-10000px;top:0;width:850px;box-sizing:border-box;background:#fff;color:#000;font-family:Arial,\u0027Segoe UI\u0027,Tahoma,sans-serif;">' +
+        '<div style="font:bold 22px Arial;text-align:center;padding:14px 0 6px;">' + T_TITLE + "</div>" +
+        '<div style="font:bold 13px Arial;text-align:center;margin:6px 0 10px;">' + T_DAY + " " + dayAr + ' &nbsp;&nbsp;&nbsp; ' + T_DATE + " " + dateLabel + "</div>" +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+        '<colgroup><col style="width:3%"><col style="width:14%"><col style="width:9%"><col style="width:7%"><col style="width:12%"><col style="width:7%"><col style="width:14%"><col style="width:7%"><col style="width:14%"><col style="width:13%"></colgroup>' +
+        headRow + bodyRows +
+        "</table></div><style>" + pageCss + "</style>";
+      document.body.insertAdjacentHTML("beforeend", pageHtml);
+      node = document.getElementById("pdfpage");
+      await document.fonts.ready;
+      const imgs = Array.from(node.querySelectorAll("img"));
+      await Promise.race([
+        Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = res; im.onerror = res; }))),
+        new Promise(r => setTimeout(r, 4000))
+      ]);
+      const dataUrl = await window.domtoimage.toPng(node, { width: node.offsetWidth, height: node.offsetHeight, bgcolor: "#ffffff", scale: 2 });
+      const aspect = node.offsetHeight / node.offsetWidth;
+      node.remove(); node = null;
+      const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const PW = 595.28, PH = 841.89, margin = 20, iw = PW - margin * 2, maxH = PH - margin * 2;
+      let h = iw * aspect;
+      if (h > maxH) { const f = maxH / h; doc.addImage(dataUrl, "PNG", (PW - iw * f) / 2, margin, iw * f, maxH); }
+      else doc.addImage(dataUrl, "PNG", margin, margin, iw, h);
+      doc.save("attendance-register-" + d + ".pdf");
+      toast("PDF downloaded");
+    } catch (e) {
+      console.error("regPdf failed", e);
+      if (node) { try { node.remove(); } catch (_) {} }
+      toast("PDF failed: " + (e && e.message ? e.message : e), "err");
     }
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-  };
-  try {
-  const d = S_reg.date;
-  const dayObj = new Date(astDayOffset(d).getTime() + 3 * 3600000);
-  const dayName = dayObj.toLocaleDateString("ar-SA-u-ca-gregory", { weekday: "long", timeZone: "UTC" });
-  const dateStr = dayObj.toLocaleDateString("ar-SA-u-ca-gregory", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-  const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
-  const siBy = {}, soBy = {};
-  for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-  const rows = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
-  // ---- Column geometry ----
-  // Template sheet is RTL: A prints at the RIGHT edge, J at the LEFT.
-  // So page order left→right: J I H G F E D C B A.
-  // Widths: template Excel char widths (A 8.4, B 41.6, C 30.7, D 15.4, E 27.1, F 12.9, G 30.7, H 27.1, I 36.6, J 8.4)
-  // scaled (x5.25pt then x0.437) to fit 547pt between 24pt margins.
-  const COLS = [
-    { k: "J", w: 19 }, { k: "I", w: 84 }, { k: "H", w: 62 }, { k: "G", w: 70 }, { k: "F", w: 30 },
-    { k: "E", w: 62 }, { k: "D", w: 36 }, { k: "C", w: 70 }, { k: "B", w: 95 }, { k: "A", w: 19 },
-  ];
-  let cx = 24;
-  const RX = {}, CC = {};
-  for (const c of COLS) { CC[c.k] = cx + c.w / 2; RX[c.k] = cx + c.w; cx += c.w; }
-  const TITLE_H = 24, DATE_H = 18, HDR_H = 16, ROW_H = 16;
-  const line = (yy, x1, x2) => { doc.setDrawColor(90); doc.setLineWidth(0.3); doc.line(x1, yy, x2, yy); };
-  const vline = (x, y1, y2) => { doc.setDrawColor(90); doc.setLineWidth(0.3); doc.line(x, y1, x, y2); };
-  // ===== Row 1: title (bold, centered, Arabic) =====
-  let y = 30;
-  setAR(15, true);
-  doc.text("سجل توقيع الحضور اليومي لموظفي دائرة الحماية والإختبارات", W / 2, y + 8, { align: "center" });
-  y += TITLE_H;
-  line(y, 24, W - 24);
-  // ===== Row 2: اليوم / التاريخ =====
-  setAR(10, false);
-  doc.text("اليوم :", RX["D"], y + 10, { align: "right" });
-  doc.text(dayName, RX["D"] - 2, y + 10, { align: "left" });
-  doc.text("التاريخ :", RX["F"], y + 10, { align: "right" });
-  doc.text(dateStr, RX["F"] - 2, y + 10, { align: "left" });
-  y += DATE_H;
-  line(y, 24, W - 24);
-  // ===== Row 3: header (Arabic, same words as the template) =====
-  doc.setFillColor(238, 238, 238); doc.rect(24, y, W - 48, HDR_H, "F");
-  const heads = { A: "#", B: "الاسم", C: "القسم", D: "الرقم الوظيفي", E: "الموقع", F: "وقت الحضور", G: "توقيع الحضور", H: "وقت الانصراف", I: "توقيع اللانصراف", J: "ملاحظات" };
-  setAR(8, false);
-  for (const k of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]) doc.text(heads[k], CC[k], y + 10.5, { align: "center" });
-  y += HDR_H;
-  line(y, 24, W - 24);
-  // ===== Rows 4..35: 32 numbered rows, thin grid (template has exactly 32 rows) =====
-  const TABLE_TOP = y, N_ROWS = 32, tableBottom = TABLE_TOP + N_ROWS * ROW_H;
-  const imgCache = {};
-  for (const p of rows) {
-    const e = String(p.employee);
-    const si = S_reg.sigs[e] && S_reg.sigs[e].in, so = S_reg.sigs[e] && S_reg.sigs[e].out;
-    if (si && si.data) imgCache[e + ":in"] = si.data;
-    if (so && so.data) imgCache[e + ":out"] = so.data;
-  }
-  for (let i = 0; i <= N_ROWS; i++) line(TABLE_TOP + i * ROW_H, 24, W - 24);
-  for (const c of COLS) vline(RX[c.k], TABLE_TOP, tableBottom);
-  vline(24, TABLE_TOP, tableBottom);
-  const colW = {}; COLS.forEach(c => (colW[c.k] = c.w));
-  const putSig = (data, k, ry) => {
-    if (!data) return;
-    try {
-      const w = colW[k] - 10, h = ROW_H - 5;
-      doc.addImage(data, "PNG", CC[k] - w / 2, ry + (ROW_H - h) / 2, w, h);
-    } catch (e2) { /* ignore one bad image */ }
-  };
-  rows.forEach((p, i) => {
-    const e = String(p.employee);
-    const isVac = vacSet.has(e);
-    const si = siBy[e], so = soBy[e];
-    const ry = TABLE_TOP + i * ROW_H;
-    if (isVac) { doc.setFillColor(255, 247, 224); doc.rect(24, ry, W - 48, ROW_H, "F"); }
-    else if (!si || !si.allowed) { doc.setFillColor(252, 230, 230); doc.rect(24, ry, W - 48, ROW_H, "F"); }
-    setAR(8, false);
-    doc.text(String(i + 1), CC["A"], ry + 10.5, { align: "center" });
-    doc.text(String(p.name || ""), CC["B"], ry + 10.5, { align: "center" });
-    doc.text(isVac ? "—" : REG_SECTION, CC["C"], ry + 10.5, { align: "center" });
-    doc.text(e, CC["D"], ry + 10.5, { align: "center" });
-    doc.text(String(p.site || "—"), CC["E"], ry + 10.5, { align: "center" });
-    doc.text(si ? fmtClock(si.at) : "", CC["F"], ry + 10.5, { align: "center" });
-    doc.text(so ? fmtClock(so.at) : "", CC["H"], ry + 10.5, { align: "center" });
-    putSig(imgCache[e + ":in"], "G", ry);
-    putSig(imgCache[e + ":out"], "I", ry);
-    // Notes (J)
-    if (isVac) { doc.text("إجازة", CC["J"], ry + 10.5, { align: "center" }); }
-    else if (!si || !si.allowed) {
-      doc.text("يحتاج مراجعة", CC["J"], ry + 7, { align: "center" });
-      const rem = S_reg.remarks[e];
-      if (rem && rem.text) { setAR(6, false); doc.text(String(rem.text).slice(0, 40), CC["J"], ry + 13.5, { align: "center" }); }
-    } else if (S_reg.remarks[e] && S_reg.remarks[e].text) {
-      setAR(6, false); doc.text(String(S_reg.remarks[e].text).slice(0, 40), CC["J"], ry + 10.5, { align: "center" });
-    }
-  });
-  setAR(7, false);
-  doc.text(`Protection Portal — ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Riyadh" })} AST`, 24, tableBottom + 14);
-  doc.save(`attendance-register-${d}.pdf`);
-  toast("PDF downloaded");
-  } catch (e) {
-    console.error("regPdf failed", e);
-    toast("PDF failed: " + (e && e.message ? e.message : e), "err");
-  }
+  })();
 }
+
 
 // ---------- wire up ----------
 document.addEventListener("DOMContentLoaded", async () => {
