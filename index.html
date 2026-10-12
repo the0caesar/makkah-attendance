@@ -420,6 +420,7 @@ table.grid.compact td.today-col { background: #19262e; }
           </tr></thead>
           <tbody></tbody>
         </table>
+        <div data-reg-hidden-strip></div>
       </div>
     </div>
     <div id="tab-sites" class="admin-tab" style="display:none"></div>
@@ -2492,7 +2493,8 @@ function renderRegister() {
     const e = String(s.employee);
     if (s.direction === "in") siBy[e] = s; else soBy[e] = s;
   }
-  const rows = S_reg.roster.slice();
+  const hiddenSet = new Set((S_reg.hidden || []).map(String));
+  const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee)));
   rows.sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
   const dayLabel = new Date(astDayOffset(d).getTime() + 3 * 3600000).toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
   tbody.innerHTML = rows.map((p, i) => {
@@ -2514,8 +2516,9 @@ function renderRegister() {
     const remarkInput = needsReview && S.me.is_approver
       ? `<input class="reg-remark" data-emp="${e}" value="${esc(rem ? rem.text : "")}" placeholder="Admin remark">`
       : "";
+    const hideBtn = S.me.is_approver ? ` <button class="btn ghost sm reg-hide" data-emp="${e}" title="Hide from register/PDF (this day)">–</button>` : "";
     return `<tr class="${isVac ? "vac" : needsReview ? "review" : ""}">
-      <td>${i + 1}</td>
+      <td>${i + 1}${hideBtn}</td>
       <td><b>${esc(p.name)}</b></td>
       <td>${isVac ? "—" : REG_SECTION}</td>
       <td>${esc(e)}</td>
@@ -2551,6 +2554,31 @@ function renderRegister() {
       toast("Signature removed"); await loadRegister(S_reg.date); renderRegister();
     } catch (e) { toast(e.message, "err"); }
   }));
+  // – hide a person from this day's register/PDF (admin only)
+  $$("#reg-table .reg-hide").forEach(b => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (!confirm("Hide this person from today's register & PDF?"))) return;
+    try {
+      await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.emp, action: "remove" } });
+      toast("Hidden from this day"); await loadRegister(S_reg.date); renderRegister();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  // restore strip: list of hidden people (this day) so an admin can un-hide them
+  const strip = $("[data-reg-hidden-strip]");
+  if (strip && S.me.is_approver) {
+    const hidden = S_reg.hidden || [];
+    strip.innerHTML = hidden.length
+      ? `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,.2);border-radius:8px;font-size:12.5px">
+          <b>Hidden this day:</b> ${hidden.map(h => { const p = S.roster.find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} (<button class="btn ghost sm" data-unhide="${esc(h)}" style="margin-left:4px;padding:1px 8px">show</button>)`; }).join(" · ")}
+        </div>`
+      : "";
+    $$("[data-reg-hidden-strip] [data-unhide]").forEach(b => b.addEventListener("click", async () => {
+      try {
+        await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.unhide, action: "add" } });
+        toast("Shown again"); await loadRegister(S_reg.date); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+    }));
+  }
   $("#reg-status").textContent = `${dayLabel} • ${rows.length} staff • ${rows.filter(p => vacSet.has(String(p.employee))).length} on vacation`;
 }
 function renderRegisterScreen() {
@@ -2662,8 +2690,9 @@ async function regPdf() {
       const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
       const siBy = {}, soBy = {};
       for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-      // sort by ID number (numeric), like the Excel sheet
-      const rows = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
+      // sort by ID number (numeric), like the Excel sheet; drop people hidden for this day
+      const hiddenSet = new Set((S_reg.hidden || []).map(String));
+      const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee))).sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
       const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
       const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
       const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
@@ -2698,7 +2727,8 @@ async function regPdf() {
         "#pdfpage .head{position:relative;height:70px}" +
         "#pdfpage .logo{position:absolute;right:6px;top:8px;height:44px}" +
         "#pdfpage .title{position:absolute;left:0;right:150px;top:0;height:70px;display:flex;align-items:center;justify-content:center;font:bold 24px Arial;text-align:center;padding:0 6px}" +
-        "#pdfpage .dd{font:bold 15px Arial;text-align:center;padding:6px 0 10px;letter-spacing:.5px}" +
+        "#pdfpage .dd{font:bold 15px Arial;padding:6px 0 10px;display:flex;justify-content:center;align-items:baseline;gap:34px}" +
+        "#pdfpage .dd .fld{white-space:nowrap;unicode-bidi:isolate}" +
         "#pdfpage table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}" +
         "#pdfpage th,#pdfpage td{border:1px solid #111;padding:4px 4px;text-align:center;vertical-align:middle;overflow:hidden;word-break:break-word}" +
         "#pdfpage thead th{font:bold 13px Arial;padding:6px 4px}" +
@@ -2710,7 +2740,7 @@ async function regPdf() {
       const pageHtml = '<div id="pdfpage" dir="rtl">' +
         '<div class="pg">' +
         '<div class="head"><img class="logo" src="logo_ngsa.jpeg" alt=""><div class="title">' + T_TITLE + "</div></div>" +
-        '<div class="dd">' + T_DAY + " " + dayAr + " &nbsp;&nbsp;&nbsp;&nbsp; " + T_DATE + " " + dateLabel + "</div>" +
+        '<div class="dd"><span class="fld" dir="rtl">' + T_DAY + " " + dayAr + "</span><span class=\"fld\" dir=\"rtl\">" + T_DATE + "</span><span class=\"fld\" dir=\"ltr\">" + dateLabel + "</span></div>" +
         '<table>' + colgroup +
         "<thead><tr>" + headRow + "</tr></thead>" +
         "<tbody>" + bodyRows + "</tbody>" +
