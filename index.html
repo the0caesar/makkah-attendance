@@ -2447,6 +2447,35 @@ async function doSign(direction) {
 
 // ---------- daily register (admin) ----------
 const REG_SECTION = "الحماية";
+// employee_number -> Arabic name (source: تخطيط الاجازات 2026.xlsb + Essam's corrections)
+const AR_NAMES = Object.freeze({
+  '104674': 'موسى صالح الزهراني',
+  '104763': 'محمد صالح سالم الحربي',
+  '105586': 'رأفت علي بنا',
+  '105588': 'ايمن عايض السلمي',
+  '108684': 'محمد محسن حسن',
+  '113791': 'عبدالله خالد الحربي',
+  '118464': 'صبغةالله انعام خان',
+  '121183': 'احمد سليم ابراهيم',
+  '122283': 'مصطفى ابراهيم فرج',
+  '63021': 'أحمد بتاوي',
+  '64574': 'حامد علي لبان',
+  '68589': 'نبيل خان',
+  '70180': 'عصام عمر الاحمدي',
+  '78474': 'عبدالكريم محمد الشهري',
+  '78481': 'مصطفى غازي باشا',
+  '80686': 'فهد محمد النفيعي',
+  '82894': 'عماد احمد الزهراني',
+  '83317': 'محمد مسري العتيبي',
+  '88314': 'رامي صدقه عاشور',
+  '89224': 'مؤيد صالح كردي',
+  '92467': 'اياد ابراهيم الحربي',
+  '92501': 'سيف محمد البارقي',
+  '96941': 'احمد ناصر الحربي',
+  '96943': 'عبدالملك هشام عقيل مدهر',
+  '97014': 'جميل غالب القرشي',
+  '97016': 'الياس سفيان محمد',
+});
 let S_reg = null; // {date, roster, signins, vacations, sigs, remarks}
 async function loadRegister(date) {
   S_reg = await api(`/api/register?date=${date}`);
@@ -2615,12 +2644,15 @@ async function regPdf() {
   if (typeof window.html2canvas === "undefined") return toast("PDF image engine not loaded", "err");
   const { jsPDF } = window.jspdf;
   toast("Building PDF\u2026");
-  const T_TITLE = "سجل توقيع الحضور اليومي لموظفي دائرة الحماية والإختبارات";
-  const T_DAY = "اليوم :";
-  const T_DATE = "التاريخ :";
-  const T_VAC = "إجازة";
-  const T_REVIEW = "يحتاج مراجعة";
-  const T_HEADS = ["الاسم", "القسم", "الرقم الوظيفي", "الموقع", "وقت الحضور", "توقيع الحضور", "وقت الانصراف", "توقيع اللانصراف", "ملاحظات"];
+  const T_TITLE = "\u0633\u062c\u0644 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u062d\u0636\u0648\u0631 \u0627\u0644\u064a\u0648\u0645\u064a \u0644\u0645\u0648\u0636\u0641\u064a \u062f\u0627\u0626\u0631\u0629 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0648\u0627\u0644\u0625\u062e\u062a\u0628\u0627\u062a";
+  const T_DAY = "\u0627\u0644\u064a\u0648\u0645 :";
+  const T_DATE = "\u0627\u0644\u062a\u0627\u0631\u064a\u062e :";
+  const T_VAC = "\u0625\u062c\u0627\u0632\u0629";
+  const T_REVIEW = "\u064a\u062d\u062a\u0627\u062c \u0645\u0631\u0627\u062c\u0639\u0629";
+  // exact Excel header order (B..J): name, section, emp#, site, in-time, in-sig, out-time, out-sig, notes
+  const T_HEADS = ["\u0627\u0644\u0627\u0633\u0645", "\u0627\u0644\u0642\u0633\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0648\u0638\u064a\u0641\u064a", "\u0627\u0644\u0645\u0648\u0642\u0639", "\u0648\u0642\u062a \u0627\u0644\u062d\u0636\u0648\u0631", "\u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u062d\u0636\u0648\u0631", "\u0648\u0642\u062a \u0627\u0644\u0627\u0646\u0635\u0631\u0627\u0641", "\u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0627\u0646\u0635\u0631\u0627\u0641", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a"];
+  // exact Excel column widths (px, from template_kashaf.xlsx): A=#,B=name,C=section,D=emp#,E=site,F=in-time,G=in-sig,H=out-time,I=out-sig,J=notes
+  const COLW = [59, 291, 150, 90, 190, 90, 215, 90, 256, 90];
   (async () => {
     let node = null;
     try {
@@ -2628,42 +2660,62 @@ async function regPdf() {
       const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
       const siBy = {}, soBy = {};
       for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-      const rows = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
+      // sort by ID number (numeric), like the Excel sheet
+      const rows = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
       const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
       const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
       const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
-      const headRow = "<tr><th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("") + "</tr>";
+      const arName = (e) => (AR_NAMES[String(e)] || "");
+      const headRow = "<th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("");
       const bodyRows = rows.map((p, i) => {
         const e = String(p.employee); const isVac = vacSet.has(e);
         const si = siBy[e], so = soBy[e]; const needsReview = !isVac && !(!!si && si.allowed);
         const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
         const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
         const rem = S_reg.remarks[e];
+        const nm = arName(e) ? arName(e) : esc(p.name);
         const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
         const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
         return "<tr>" +
-          "<td>" + (i + 1) + "</td>" +
-          "<td>" + esc(p.name) + "</td>" +
+          "<td class='ctr'>" + (i + 1) + "</td>" +
+          '<td class="arname">' + nm + "</td>" +
           "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
-          "<td>" + esc(e) + "</td>" +
+          '<td class="ltr">' + esc(e) + "</td>" +
           "<td>" + esc(p.site || "\u2014") + "</td>" +
-          '<td class="ltr">' + (si ? esc(fmtClock(si.at)) : "") + "</td>" +
-          "<td>" + sig(sigIn) + "</td>" +
-          '<td class="ltr">' + (so ? esc(fmtClock(so.at)) : "") + "</td>" +
-          "<td>" + sig(sigOut) + "</td>" +
-          '<td class="ltr">' + note + "</td>" +
+          '<td class="ltr ctr">' + (si ? esc(fmtClock(si.at)) : "") + "</td>" +
+          '<td class="sigc">' + sig(sigIn) + "</td>" +
+          '<td class="ltr ctr">' + (so ? esc(fmtClock(so.at)) : "") + "</td>" +
+          '<td class="sigc">' + sig(sigOut) + "</td>" +
+          '<td class="note">' + note + "</td>" +
           "</tr>";
       }).join("");
-      const pageCss = "#pdfpage td,#pdfpage th{border:1px solid #222;padding:3px 5px;text-align:center;vertical-align:middle}#pdfpage th{font-weight:bold;background:#f4f4f4}#pdfpage td.ltr{direction:ltr}#pdfpage .sigimg{max-height:30px;max-width:100%;display:block;margin:0 auto}";
-      const pageHtml = '<div id="pdfpage" dir="rtl" style="position:fixed;left:-10000px;top:0;width:850px;box-sizing:border-box;background:#fff;color:#000;font-family:Arial,\u0027Segoe UI\u0027,Tahoma,sans-serif;">' +
-        '<div style="font:bold 22px Arial;text-align:center;padding:14px 0 6px;">' + T_TITLE + "</div>" +
-        '<div style="font:bold 13px Arial;text-align:center;margin:6px 0 10px;">' + T_DAY + " " + dayAr + ' &nbsp;&nbsp;&nbsp; ' + T_DATE + " " + dateLabel + "</div>" +
-        '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
-        '<colgroup><col style="width:3%"><col style="width:14%"><col style="width:9%"><col style="width:7%"><col style="width:12%"><col style="width:7%"><col style="width:14%"><col style="width:7%"><col style="width:14%"><col style="width:13%"></colgroup>' +
-        headRow + bodyRows +
-        "</table></div><style>" + pageCss + "</style>";
-      document.body.insertAdjacentHTML("beforeend", pageHtml);
-      node = document.getElementById("pdfpage");
+      const colgroup = "<colgroup>" + COLW.map(w => '<col style="width:' + w + 'px">').join("") + "</colgroup>";
+      const pageCss = "#pdfpage{font-family:Arial,'Segoe UI',Tahoma,sans-serif;background:#fff;color:#000}" +
+        "#pdfpage .pg{width:1521px;box-sizing:border-box;position:relative}" +
+        "#pdfpage .head{position:relative;height:70px}" +
+        "#pdfpage .logo{position:absolute;right:6px;top:8px;height:44px}" +
+        "#pdfpage .title{position:absolute;left:0;right:150px;top:0;height:70px;display:flex;align-items:center;justify-content:center;font:bold 24px Arial;text-align:center;padding:0 6px}" +
+        "#pdfpage .dd{font:bold 15px Arial;text-align:center;padding:6px 0 10px;letter-spacing:.5px}" +
+        "#pdfpage table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}" +
+        "#pdfpage th,#pdfpage td{border:1px solid #111;padding:4px 4px;text-align:center;vertical-align:middle;overflow:hidden;word-break:break-word}" +
+        "#pdfpage thead th{font:bold 13px Arial;padding:6px 4px}" +
+        "#pdfpage td.arname{font:bold 13px 'Segoe UI',Tahoma,Arial;text-align:center}" +
+        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:34px}" +
+        "#pdfpage td.note{font-size:11px;line-height:1.35}";
+      const pageHtml = '<div id="pdfpage" dir="rtl">' +
+        '<div class="pg">' +
+        '<div class="head"><img class="logo" src="logo_ngsa.jpeg" alt=""><div class="title">' + T_TITLE + "</div></div>" +
+        '<div class="dd">' + T_DAY + " " + dayAr + " &nbsp;&nbsp;&nbsp;&nbsp; " + T_DATE + " " + dateLabel + "</div>" +
+        '<table>' + colgroup +
+        "<thead><tr>" + headRow + "</tr></thead>" +
+        "<tbody>" + bodyRows + "</tbody>" +
+        "</table>" +
+        "</div><style>" + pageCss + "</style></div>";
+      const host = document.createElement("div");
+      host.style.cssText = "position:fixed;left:-10000px;top:0;";
+      host.innerHTML = pageHtml;
+      document.body.appendChild(host);
+      node = host.querySelector("#pdfpage");
       await document.fonts.ready;
       const imgs = Array.from(node.querySelectorAll("img"));
       await Promise.race([
@@ -2673,7 +2725,7 @@ async function regPdf() {
       const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
       const dataUrl = canvas.toDataURL("image/png");
       const aspect = node.offsetHeight / node.offsetWidth;
-      node.remove(); node = null;
+      node = null; host.remove();
       const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
       const PW = 595.28, PH = 841.89, margin = 20, iw = PW - margin * 2, maxH = PH - margin * 2;
       let h = iw * aspect;
