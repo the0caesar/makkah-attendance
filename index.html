@@ -2584,20 +2584,32 @@ function renderRegister() {
   // ✕ clear a signature (admin only) — stopPropagation so the cell doesn't re-open the modal
   $$("#reg-table .reg-sigclear").forEach(b => b.addEventListener("click", async (ev) => {
     ev.stopPropagation();
-    if (!confirm("Remove this signature?")) return;
-    try {
-      await api(`/api/register/sig?date=${S_reg.date}&employee=${encodeURIComponent(b.dataset.emp)}&direction=${b.dataset.dir}`, { method: "DELETE" });
-      toast("Signature removed"); await loadRegister(S_reg.date); renderRegister();
-    } catch (e) { toast(e.message, "err"); }
+    // two-step: native confirm() is suppressed inside the Teams iframe
+    if (b.dataset.arm) {
+      delete b.dataset.arm; b.textContent = "✕";
+      try {
+        await api(`/api/register/sig?date=${S_reg.date}&employee=${encodeURIComponent(b.dataset.emp)}&direction=${b.dataset.dir}`, { method: "DELETE" });
+        toast("Signature removed"); await loadRegister(S_reg.date); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+      return;
+    }
+    b.dataset.arm = "1"; b.textContent = "Confirm?";
+    setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "✕"; } }, 3000);
   }));
   // – hide a person from this day's register/PDF (admin only)
   $$("#reg-table .reg-hide").forEach(b => b.addEventListener("click", async (ev) => {
     ev.stopPropagation();
-    if (!confirm("Hide this person from today's register & PDF?")) return;
-    try {
-      await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.emp, action: "remove" } });
-      toast("Hidden from this day"); await loadRegister(S_reg.date); renderRegister();
-    } catch (e) { toast(e.message, "err"); }
+    // two-step: native confirm() is suppressed inside the Teams iframe
+    if (b.dataset.arm) {
+      delete b.dataset.arm; b.textContent = "–";
+      try {
+        await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.emp, action: "remove" } });
+        toast("Hidden from this day"); await loadRegister(S_reg.date); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+      return;
+    }
+    b.dataset.arm = "1"; b.textContent = "Confirm?"; b.title = "Click again to hide this person from today's register & PDF";
+    setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "–"; b.title = ""; } }, 3000);
   }));
   // restore strip: list of hidden people (this day) so an admin can un-hide them
   const strip = $("[data-reg-hidden-strip]");
