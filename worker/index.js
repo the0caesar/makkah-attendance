@@ -912,7 +912,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/")) {
       const name = url.pathname.slice(5);
-      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true, "geo.html": true, "jspdf.umd.min.js": true, "dom-to-image-more.min.js": true, "arabic.ttf": true, "amiri-bold.ttf": true };
+      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true, "geo.html": true, "jspdf.umd.min.js": true, "html2canvas.min.js": true, "arabic.ttf": true, "amiri-bold.ttf": true };
       if (!ALLOWED[name]) return json({ error: "not found" }, 404, cors);
       const f = await fetch(`https://the0caesar.github.io/makkah-attendance/${name}`, { cf: { cacheTtl: 0 } });
       const h = new Headers(f.headers);

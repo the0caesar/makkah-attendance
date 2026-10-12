@@ -488,7 +488,7 @@ table.grid.compact td.today-col { background: #19262e; }
 
 </script>
 <script src="jspdf.umd.min.js"></script>
-<script src="dom-to-image-more.min.js"></script>
+<script src="html2canvas.min.js"></script>
 <script>
 /* Team Pulse — Makkah Protection Team attendance app
    All API calls go to /api/* (proxy). See SPEC.md for the data model. */
@@ -2612,7 +2612,7 @@ function promptSignature(direction) {
 async function regPdf() {
   if (!S_reg) return toast("Load a day first", "err");
   if (!window.jspdf || !window.jspdf.jsPDF) return toast("PDF engine not loaded", "err");
-  if (typeof window.domtoimage === "undefined") return toast("PDF image engine not loaded", "err");
+  if (typeof window.html2canvas === "undefined") return toast("PDF image engine not loaded", "err");
   const { jsPDF } = window.jspdf;
   toast("Building PDF\u2026");
   const T_TITLE = "سجل توقيع الحضور اليومي لموظفي دائرة الحماية والإختبارات";
@@ -2670,7 +2670,8 @@ async function regPdf() {
         Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = res; im.onerror = res; }))),
         new Promise(r => setTimeout(r, 4000))
       ]);
-      const dataUrl = await window.domtoimage.toPng(node, { width: node.offsetWidth, height: node.offsetHeight, bgcolor: "#ffffff", scale: 2 });
+      const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
+      const dataUrl = canvas.toDataURL("image/png");
       const aspect = node.offsetHeight / node.offsetWidth;
       node.remove(); node = null;
       const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
