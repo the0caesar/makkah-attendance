@@ -477,7 +477,7 @@ async function handleApi(env, method, path, q, body, m) {
   const regDate = (d) => String(d || "").slice(0, 10);
   const kv = env.REG_SIGS;
   if (p === "/api/register" && method === "GET") {
-    const d = regDate(new URL(req.url).searchParams.get("date") || "");
+    const d = regDate((q.date && q.date[0]) || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return [{ error: "date required (YYYY-MM-DD)" }, 400];
     // roster (all, incl. admin-only — register is an admin document)
     const rr = await call(env, "GET",
