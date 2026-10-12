@@ -407,8 +407,7 @@ table.grid.compact td.today-col { background: #19262e; }
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin:10px 0">
         <label style="font-size:13px;color:var(--muted)">Site</label>
-        <input type="text" id="editsig-site" list="editsig-sites" style="flex:1;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:14px">
-        <datalist id="editsig-sites"></datalist>
+        <select id="editsig-site" style="flex:1;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:14px"></select>
       </div>
       <div class="sig-actions">
         <button class="btn ghost" id="editsig-delete">🗑 Delete this sign-in</button>
@@ -2485,14 +2484,14 @@ function setSignState() {
   const signedIn = !!(S.me && S.me.signed_in);
   const bi = $("#btn-signin"), bo = $("#btn-signout");
   if (!bi || !bo) return;
-  bi.style.background = signedIn ? "" : "#1fa85a";
-  bi.style.borderColor = signedIn ? "" : "#1fa85a";
-  bo.style.background = signedIn ? "#d64545" : "";
-  bo.style.borderColor = signedIn ? "#d64545" : "";
-  bi.disabled = signedIn;          // already in -> can't sign in again
-  bo.disabled = !signedIn;         // not in -> can't sign out
-  bi.title = signedIn ? "You're already signed in" : "Sign in";
-  bo.title = signedIn ? "Sign out" : "You're not signed in";
+  // Only the action you're allowed to do is VISIBLE: signed out -> only Sign In,
+  // signed in -> only Sign Out.
+  bi.style.display = signedIn ? "none" : "";
+  bo.style.display = signedIn ? "" : "none";
+  bi.style.background = "#1fa85a";
+  bi.style.borderColor = "#1fa85a";
+  bo.style.background = "#d64545";
+  bo.style.borderColor = "#d64545";
 }
 async function doSign(direction) {
   // Guard: only allow the transition that matches current state.
@@ -2658,10 +2657,28 @@ function renderRegister() {
     $("#editsig-title").textContent = `Edit ${dir === "in" ? "sign-in" : "sign-out"} — ${S_reg.roster.find(x => String(x.employee) === String(rec.employee))?.name || rec.employee}`;
     const hms = new Date(rec.at).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     $("#editsig-time").value = hms;
-    $("#editsig-site").value = rec.site || "";
-    const dl = $("#editsig-sites");
-    dl.innerHTML = "";
-    (S.sites || []).forEach(s => { const o = document.createElement("option"); o.value = s.name || s.id; dl.appendChild(o); });
+    const siteSel = $("#editsig-site");
+    siteSel.innerHTML = "";
+    const sites = S.sites || [];
+    const curSite = rec.site || "";
+    // If the stored site is missing from the DB list, still show it (so we don't lose it)
+    if (curSite && !sites.some(s => (s.name || s.id) === curSite)) {
+      const o = document.createElement("option");
+      o.value = curSite; o.textContent = curSite + " (not in list)";
+      o.selected = true;
+      siteSel.appendChild(o);
+    }
+    sites.forEach(s => {
+      const nm = s.name || s.id;
+      const o = document.createElement("option");
+      o.value = nm; o.textContent = nm;
+      if (nm === curSite) o.selected = true;
+      siteSel.appendChild(o);
+    });
+    if (!curSite && sites.length) {
+      // no stored site -> pick first by default
+      siteSel.selectedIndex = 0;
+    }
     let armDel = false;
     const del = $("#editsig-delete");
     del.onclick = async () => {
@@ -2718,48 +2735,97 @@ function renderRegisterScreen() {
 }
 
 // ---------- signature modal (canvas) ----------
-let sigCtx = null, sigDirty = false, sigTarget = null;
+let sigCtx = null, sigDirty = false, sigTarget = null, sigSaving = false;
 function openSigModal(emp, direction) {
   sigTarget = { emp: String(emp), direction };
   const modal = $("#sig-modal");
   modal.style.display = "flex";
   const c = $("#sig-canvas");
   const wrap = c.parentElement;
-  // 4:1 aspect ratio (matches the PDF cell 96x24) so the signature you draw looks
-  // the same size/shape in the register and the PDF — no squish, no stretch.
-  const w = wrap.clientWidth || 400, h = Math.round(w / 4);
-  const dpr = window.devicePixelRatio || 1;
-  c.width = w * dpr; c.height = h * dpr;
-  sigCtx = c.getContext("2d");
-  sigCtx.scale(dpr, dpr);
-  // paint a white background into the BITMAP (CSS white is not part of the exported PNG,
-  // so without this the ink is invisible on the dark table / white PDF needs a base too)
-  sigCtx.fillStyle = "#ffffff";
-  sigCtx.fillRect(0, 0, w, h);
-  sigCtx.lineWidth = 3.6; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round";
-  sigCtx.strokeStyle = "#111";
-  sigDirty = false;
+  // The canvas is a FIXED logical size (width x height, 4:1 to match the PDF cell).
+  // We size its BACKING STORE once in device pixels. When the page zooms, dpr and
+  // the on-screen size change — so on the next stroke we re-sync: rebuild the
+  // backing store at the new dpr and redraw the committed image. That keeps the
+  // pad reacting correctly no matter how far you've zoomed.
+  let committed = null;        // dataURL of the last full drawing (logical size)
   let drawing = false, last = null;
+  let lastDpr = 0, lastW = 0, lastH = 0;
+
+  function logicalSize() {
+    // Logical (CSS) size of the pad: full width of the box, 4:1.
+    const lw = wrap.clientWidth || 400, lh = Math.round(lw / 4);
+    return { lw, lh };
+  }
+  function resync() {
+    // (Re)build the backing store for the CURRENT dpr and redraw the committed image.
+    const { lw, lh } = logicalSize();
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr === lastDpr && lw === lastW && lh === lastH) return; // nothing changed
+    c.width = Math.round(lw * dpr);
+    c.height = Math.round(lh * dpr);
+    c.style.width = lw + "px";
+    c.style.height = lh + "px";
+    lastDpr = dpr; lastW = lw; lastH = lh;
+    sigCtx = c.getContext("2d");
+    sigCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sigCtx.fillStyle = "#ffffff";
+    sigCtx.fillRect(0, 0, lw, lh);
+    sigCtx.lineWidth = 3.6; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round";
+    sigCtx.strokeStyle = "#111";
+    if (committed) {
+      const img = new Image();
+      img.onload = () => sigCtx.drawImage(img, 0, 0, lw, lh);
+      img.src = committed;
+    }
+  }
+  resync();
+
   const pos = (ev) => { const r = c.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
-  c.onpointerdown = (ev) => { drawing = true; last = pos(ev); c.setPointerCapture(ev.pointerId); };
-  c.onpointermove = (ev) => {
+  c.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    resync();                      // re-sync after any zoom/resize
+    drawing = true;
+    last = pos(ev);
+    try { c.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  c.addEventListener("pointermove", (ev) => {
     if (!drawing) return;
+    ev.preventDefault();
     const p = pos(ev);
     sigCtx.beginPath(); sigCtx.moveTo(last.x, last.y); sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
     last = p; sigDirty = true;
+  });
+  const endStroke = () => { drawing = false; };
+  c.addEventListener("pointerup", endStroke);
+  c.addEventListener("pointercancel", endStroke);
+
+  $("#sig-clear").onclick = () => {
+    const { lw, lh } = logicalSize();
+    sigCtx.setTransform(1, 0, 0, 1, 0, 0);
+    sigCtx.clearRect(0, 0, c.width, c.height);
+    sigCtx.setTransform(lastDpr || 1, 0, 0, lastDpr || 1, 0, 0);
+    sigCtx.fillStyle = "#ffffff"; sigCtx.fillRect(0, 0, lw, lh);
+    committed = null; sigDirty = false;
   };
-  c.onpointerup = c.onpointerleave = () => { drawing = false; };
-  $("#sig-clear").onclick = () => { sigCtx.save(); sigCtx.setTransform(1, 0, 0, 1, 0, 0); sigCtx.clearRect(0, 0, c.width, c.height); sigCtx.restore(); sigDirty = false; };
   $("#sig-cancel").onclick = () => { modal.style.display = "none"; };
-  $("#sig-save").onclick = async () => {
+  const saveBtn = $("#sig-save");
+  saveBtn.type = "button";
+  saveBtn.onclick = async () => {
+    if (sigSaving) return;                 // one save at a time — no double-fire
     if (!sigDirty) return toast("Draw your signature first", "err");
+    sigSaving = true; saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     try {
       const data = c.toDataURL("image/png");
       await api("/api/register/sig", { method: "POST", body: { date: todayISO(), employee: sigTarget.emp, direction: sigTarget.direction, data } });
+      committed = data;
       modal.style.display = "none";
       toast("Signature saved ✓");
       if (S_reg && S_reg.date === todayISO()) { await loadRegister(S_reg.date); renderRegister(); }
-    } catch (e) { toast(e.message, "err"); }
+    } catch (e) {
+      toast(e.message, "err");
+    } finally {
+      sigSaving = false; saveBtn.disabled = false; saveBtn.textContent = "Save signature";
+    }
   };
 }
 
