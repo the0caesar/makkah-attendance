@@ -770,6 +770,9 @@ function corsHeaders(env, req) {
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Dev-Email",
     "Access-Control-Max-Age": "86400",
+    // Data changes constantly (sign-ins, signatures) — never let Cloudflare/cache
+    // serve a stale GET, or the register shows old data & missing signatures.
+    "Cache-Control": "no-store",
   };
 }
 

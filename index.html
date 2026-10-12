@@ -2479,8 +2479,8 @@ async function doSign(direction) {
       direction, latitude: g.lat, longitude: g.lon, accuracy: g.acc,
     } });
     toast(direction === "in" ? `Signed in ✓ ${r.site}` : `Signed out ✓ ${r.site}`);
-    await refresh();
-    promptSignature(direction); // capture the signature for the daily register
+    promptSignature(direction); // open the pad IMMEDIATELY (don't wait for the data refresh)
+    refresh().catch(() => {});  // refresh data in the background
   } catch (e) {
     showAlert(verb + " blocked", humanizeSignError(e));
   } finally { btn.disabled = false; }
@@ -2533,14 +2533,13 @@ function renderRegister() {
     const e = String(s.employee);
     if (s.direction === "in") siBy[e] = s; else soBy[e] = s;
   }
-  // Permanent exclude list (all days). Number is STABLE: it's each person's rank in
-  // the full roster sorted by employee number, so hiding someone never renumbers the rest.
+  // Permanent exclude list (all days). Number the VISIBLE people 1..N (first shown = #1),
+  // same as the PDF — hidden people leave no gaps.
   const hiddenSet = new Set((S_reg.exclude || []).map(String));
-  const allSorted = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
-  const numBy = {}; allSorted.forEach((p, i) => numBy[String(p.employee)] = i + 1);
-  const rows = allSorted.filter(p => !hiddenSet.has(String(p.employee)));
+  const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee)))
+    .sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
   const dayLabel = new Date(astDayOffset(d).getTime() + 3 * 3600000).toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
-  tbody.innerHTML = rows.map((p) => {
+  tbody.innerHTML = rows.map((p, i) => {
     const e = String(p.employee);
     const isVac = vacSet.has(e);
     const si = siBy[e], so = soBy[e];
@@ -2564,7 +2563,7 @@ function renderRegister() {
       ? `<label class="reg-vislab" title="Checked = shown, unchecked = hidden (permanent, all days)"><input type="checkbox" class="reg-vis" data-emp="${e}" ${!hiddenSet.has(e) ? "checked" : ""}></label>`
       : "";
     return `<tr class="${isVac ? "vac" : needsReview ? "review" : ""}">
-      <td class="reg-numcell">${visBox}<span class="reg-num">${numBy[e]}</span></td>
+      <td class="reg-numcell">${visBox}<span class="reg-num">${i + 1}</span></td>
       <td><b>${esc(p.name)}</b></td>
       <td>${isVac ? "—" : REG_SECTION}</td>
       <td>${esc(e)}</td>
@@ -2655,7 +2654,7 @@ function openSigModal(emp, direction) {
   // so without this the ink is invisible on the dark table / white PDF needs a base too)
   sigCtx.fillStyle = "#ffffff";
   sigCtx.fillRect(0, 0, w, h);
-  sigCtx.lineWidth = 2.4; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round";
+  sigCtx.lineWidth = 3.6; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round";
   sigCtx.strokeStyle = "#111";
   sigDirty = false;
   let drawing = false, last = null;
@@ -2882,7 +2881,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   const ac = $("#btn-auth-copy"); if (ac) ac.addEventListener("click", () => {
     navigator.clipboard.writeText($("#unlinked-email").textContent).then(() => toast("Email copied — send it to your supervisor"));
   });
-  setInterval(() => { if (!document.hidden && (S.screen === "today" || S.screen === "approvals")) refresh().catch(() => { }); }, 60000);
+  // Auto-refresh every 5s on every screen (data/signatures change often; the user
+  // shouldn't have to hit Refresh). Skip while the signature pad is open so a
+  // half-drawn signature isn't wiped, and don't run overlapping requests.
+  setInterval(async () => {
+    if (document.hidden) return;
+    if ($("#sig-modal") && $("#sig-modal").style.display === "flex") return;
+    // Don't clobber a field the user is editing (e.g. typing a remark).
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest("#reg-table")) return;
+    if (S.refreshing) return;
+    S.refreshing = true;
+    try {
+      await refresh();
+      // Register (admin) reads from S_reg — re-fetch it so new signatures/data show up
+      // without the user hitting Refresh. Only when a register day is loaded.
+      if (S_reg) { await loadRegister(S_reg.date); renderRegister(); }
+    } catch (e) { } finally { S.refreshing = false; }
+  }, 5000);
   // identity first (prod only), then data
   if (API_BASE) {
     // Guard the sign-in handshake: if the Teams SSO token never resolves (a known
