@@ -432,6 +432,7 @@ table.grid.compact td.today-col { background: #19262e; }
       <div class="reg-bar">
         <input type="date" id="reg-date">
         <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
+        <button class="btn ghost" id="reg-add-sig">✍ Add signature</button>
         <button class="btn primary" id="reg-pdf">⬇ Download PDF</button>
         <span class="hint" id="reg-status"></span>
       </div>
@@ -1289,23 +1290,6 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const TZ = "Asia/Riyadh"; // AST
 
-// Network observability: log every fetch to the debug banner so a hanging or
-// failing request is visible (which URL, status, ms). Only logs when the
-// banner is present (i.e. boot is in progress), to avoid noise in steady state.
-(() => {
-  const raw = window.fetch;
-  window.fetch = function (u, opts) {
-    let p = raw.apply(this, arguments);
-    if (window.__dbg && $("#dbg-banner")) {
-      const t0 = Date.now();
-      const url = (u && u.url) || u;
-      p = p.then(r => { dbg("net OK " + (r.status) + " " + Math.round(Date.now() - t0) + "ms " + String(url).replace(API_BASE, "")); return r; },
-        e => { dbg("net FAIL " + Math.round(Date.now() - t0) + "ms " + String(url).replace(API_BASE, "") + " :: " + (e && e.message || e)); throw e; });
-    }
-    return p;
-  };
-})();
-
 function toast(msg, kind = "ok") {
   const t = $("#toast");
   t.textContent = msg;
@@ -1314,22 +1298,6 @@ function toast(msg, kind = "ok") {
   clearTimeout(t._h);
   t._h = setTimeout(() => (t.style.display = "none"), 4000);
 }
-// Persistent debug banner: shows the exact boot stage so a stuck/failed load
-// is visible on-screen instead of a blank body. Removed by dbgDone() on success.
-function dbg(stage, extra) {
-  window.__dbg = true;
-  window.__dbglog = window.__dbglog || [];
-  window.__dbglog.push(stage + (extra ? " — " + extra : "") + " (" + new Date().toLocaleTimeString("en-GB") + ")");
-  let d = $("#dbg-banner");
-  if (!d) {
-    d = document.createElement("div");
-    d.id = "dbg-banner";
-    d.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;background:#7f1d1d;color:#fff;font:11px/1.45 monospace;padding:8px 10px;border:1px solid #f87171;border-radius:8px;max-width:74vw;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5)";
-    document.body.appendChild(d);
-  }
-  d.textContent = "[PP] " + window.__dbglog.slice(-8).join("\n");
-}
-function dbgDone() { const d = $("#dbg-banner"); if (d) d.remove(); window.__dbglog = []; }
 // Big confirm alert (in-page — native dialogs are suppressed inside the Teams iframe).
 function showAlert(title, msg, icon = "⛔") {
   let ov = $("#alert-overlay");
@@ -2641,6 +2609,7 @@ function renderRegister() {
   });
   // clickable signature cells (admin adds/edits any person's signature from the register)
   $$("#reg-table .reg-sigcell").forEach(td => td.addEventListener("click", () => {
+    sigDate = S_reg.date; // save to the register's selected day
     openSigModal(td.dataset.emp, td.dataset.dir);
   }));
   // ✕ clear a signature (admin only) — stopPropagation so the cell doesn't re-open the modal
@@ -2749,6 +2718,7 @@ function renderRegisterScreen() {
 let sigCtx = null, sigDirty = false, sigTarget = null, sigSaving = false;
 let pendingSignin = null;   // promise for the in-flight sign-in (set by doSign); save awaits it
 let _sigPadIsSignin = false;// true when doSign() opens the pad for a fresh sign-in (save should await pendingSignin)
+let sigDate = null;         // the register date the current pad belongs to (Today -> today; picker -> selected day)
 function openSigModal(emp, direction) {
   sigTarget = { emp: String(emp), direction };
   // Only await the in-flight sign-in if THIS pad-open was triggered by doSign.
@@ -2843,11 +2813,14 @@ function openSigModal(emp, direction) {
     sigSaving = true; saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     try {
       const data = c.toDataURL("image/png");
-      await api("/api/register/sig", { method: "POST", body: { date: todayISO(), employee: sigTarget.emp, direction: sigTarget.direction, data } });
+      // Save to the register date this pad belongs to (sigDate set when the pad opened:
+      // Today -> today; Add-signature picker -> the selected day).
+      const targetDate = sigDate || todayISO();
+      await api("/api/register/sig", { method: "POST", body: { date: targetDate, employee: sigTarget.emp, direction: sigTarget.direction, data } });
       committed = data;
       modal.style.display = "none";
       toast("Signature saved ✓");
-      if (S_reg && S_reg.date === todayISO()) { await loadRegister(S_reg.date); renderRegister(); }
+      if (S_reg && S_reg.date === targetDate) { await loadRegister(targetDate); renderRegister(); }
     } catch (e) {
       toast(e.message, "err");
     } finally {
@@ -2857,20 +2830,36 @@ function openSigModal(emp, direction) {
 }
 
 // ---------- register PDF (jsPDF + Amiri for Arabic) ----------
+// Add a signature for a person on the loaded register day. Condition (per Essam):
+// the person must have ALREADY signed in (or out) that day — we only list people
+// who have a sign-in/sign-out record for the day, and only offer the direction(s)
+// they actually signed. (Normally a signature is drawn right after signing; this is
+// a fallback if one got skipped.)
 function openRegSigPicker() {
   if (!S_reg) return toast("Load a day first", "err");
+  // Which directions each person has for THIS day?
+  const signed = {}; // employee -> { in: bool, out: bool }
+  (S_reg.signins || []).forEach(s => {
+    if (!signed[s.employee]) signed[s.employee] = { in: false, out: false };
+    if (s.direction === "in") signed[s.employee].in = true;
+    else signed[s.employee].out = true;
+  });
+  const signedEmps = Object.keys(signed).length;
   const opts = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)))
+    .filter(p => signed[p.employee])   // ONLY people who signed that day
     .map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(String(p.employee))})</option>`).join("");
   const old = document.querySelector("#pks-modal"); if (old) old.remove();
   const div = document.createElement("div");
   div.id = "pks-modal";
   div.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px";
-  div.innerHTML = `<div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;width:100%;max-width:420px">
-    <div style="font-weight:700;margin-bottom:10px">Add signature</div>
-    <select id="pks-p" style="width:100%;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px">${opts}</select>
+  div.innerHTML = `<div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;width:100%;max-width:440px">
+    <div style="font-weight:700;margin-bottom:6px">Add signature</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Only people who signed in/out on ${esc(S_reg.date)} are listed.</div>
+    ${signedEmps ? `<select id="pks-p" style="width:100%;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px">${opts}</select>`
+                 : `<div style="padding:10px;text-align:center;color:var(--muted)">No one has signed ${esc(S_reg.date)} yet.</div>`}
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn primary" id="pks-in">Sign-in</button>
-      <button class="btn" id="pks-out">Sign-out</button>
+      <button class="btn primary" id="pks-in">Add sign-in signature</button>
+      <button class="btn primary" id="pks-out">Add sign-out signature</button>
       <button class="btn ghost" id="pks-cancel">Cancel</button>
     </div>
   </div>`;
@@ -2878,14 +2867,22 @@ function openRegSigPicker() {
   const close = () => div.remove();
   div.addEventListener("click", e => { if (e.target === div) close(); });
   $("#pks-cancel").addEventListener("click", close);
-  $("#pks-in").addEventListener("click", () => { const v = $("#pks-p").value; close(); if (v) openSigModal(v, "in"); });
-  $("#pks-out").addEventListener("click", () => { const v = $("#pks-p").value; close(); if (v) openSigModal(v, "out"); });
+  const pick = (dir) => {
+    const v = $("#pks-p"); if (!v) return toast("No one signed this day", "err");
+    const emp = v.value;
+    if (!emp) return toast("Pick a person first", "err");
+    if (!signed[emp] || !signed[emp][dir]) return toast("That person didn't sign " + dir + " this day", "err");
+    sigDate = S_reg.date;      // pad will save to THIS day's bucket
+    close(); openSigModal(emp, dir);
+  };
+  $("#pks-in").addEventListener("click", () => pick("in"));
+  $("#pks-out").addEventListener("click", () => pick("out"));
 }
 // after a sign-in/out succeeds, ask the person to draw their signature for the register.
 // Always prompt — do NOT depend on the register API (if it fails, the signature can still be
 // saved from the Current-view register section).
 function promptSignature(direction) {
-  try { openSigModal(String(S.me.employee_number), direction); }
+  try { sigDate = todayISO(); openSigModal(String(S.me.employee_number), direction); }
   catch (e2) { console.warn("sig prompt failed", e2); }
 }
 async function regPdf() {
@@ -3000,7 +2997,6 @@ async function regPdf() {
 
 // ---------- wire up ----------
 document.addEventListener("DOMContentLoaded", async () => {
-  dbg("boot: DOM ready");
   $$("#nav button").forEach(b => b.addEventListener("click", () => showScreen(b.dataset.screen)));
   $("#btn-signin").addEventListener("click", () => doSign("in"));
   $("#btn-signout").addEventListener("click", () => doSign("out"));
@@ -3008,6 +3004,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#reg-date").value = todayISO();
   $("#reg-date").addEventListener("change", () => { S_reg = null; renderRegisterScreen(); });
   $("#reg-refresh").addEventListener("click", () => { S_reg = null; renderRegisterScreen(); });
+  $("#reg-add-sig").addEventListener("click", () => openRegSigPicker());
   $("#reg-pdf").addEventListener("click", () => regPdf());
   $("#wk-prev").addEventListener("click", async () => {
     const x = new Date(S.weekStart);
@@ -3098,20 +3095,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (API_BASE) {
     // Guard the sign-in handshake: if the Teams SSO token never resolves (a known
     // stall), don't hang on the shell forever — fall through to the sign-in screen.
-    dbg("boot: acquiring sign-in (15s guard)");
     const tok = await Promise.race([
       ensureAuth(),
       new Promise(res => setTimeout(() => { AUTH_ERR = "sign-in timed out — please retry"; res(null); }, 15000)),
     ]);
-    if (!tok) { dbg("boot: sign-in FAILED — " + (AUTH_ERR || "no token"), "showing login"); showAuthScreen("login"); return; }
-    dbg("boot: sign-in OK");
+    if (!tok) { showAuthScreen("login"); return; }
   }
   try {
-    dbg("boot: loading data (roster/sign-ins)");
     await refreshAll();
-    dbgDone();
   } catch (e) {
-    dbg("boot: DATA ERROR — " + (e.message || e) + " (code " + (e.code || "?") + ")");
     if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
     if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
