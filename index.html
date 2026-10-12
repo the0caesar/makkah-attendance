@@ -278,7 +278,6 @@ table.grid.compact td.today-col { background: #19262e; }
     <button data-screen="requests">Requests</button>
     <button data-screen="shifts">Shifts</button>
     <button data-screen="approvals" id="nav-approvals" style="display:none">Approvals</button>
-    <button data-screen="register" id="nav-register" style="display:none">Register</button>
     <button data-screen="admin" id="nav-admin" style="display:none">Admin</button>
   </nav>
   <div class="who" id="who">…</div>
@@ -377,28 +376,6 @@ table.grid.compact td.today-col { background: #19262e; }
   </section>
 
   <!-- DAILY REGISTER (admin) -->
-  <section id="screen-register" class="screen" style="display:none">
-    <h2>Daily Attendance Register</h2>
-    <div class="reg-bar">
-      <input type="date" id="reg-date">
-      <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
-      <button class="btn primary" id="reg-pdf">⬇ Download PDF</button>
-      <button class="btn" id="reg-add-sig">✍ Add signature</button>
-      <span class="hint" id="reg-status"></span>
-    </div>
-    <div class="reg-wrap">
-      <table id="reg-table">
-        <thead><tr>
-          <th>#</th><th>Name</th><th>Section</th><th>Emp #</th><th>Site</th>
-          <th>Sign-in time</th><th>Sign-in signature</th>
-          <th>Sign-out time</th><th>Sign-out signature</th>
-          <th>Notes</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
   <!-- SIGNATURE MODAL -->
   <div id="sig-modal" style="display:none">
     <div class="sig-box">
@@ -416,13 +393,34 @@ table.grid.compact td.today-col { background: #19262e; }
   <section id="screen-admin" class="screen" style="display:none">
     <h2>Admin</h2>
     <div class="tabs" id="admin-tabs">
-      <button data-tab="sites" class="active">Sites</button>
+      <button data-tab="register" class="active">Register</button>
+      <button data-tab="sites">Sites</button>
       <button data-tab="oncall">On-Call</button>
       <button data-tab="logs">Logs</button>
       <button data-tab="people">People</button>
       <button data-tab="settings">Settings</button>
     </div>
-    <div id="tab-sites" class="admin-tab"></div>
+    <div id="tab-register" class="admin-tab">
+      <div class="reg-bar">
+        <input type="date" id="reg-date">
+        <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
+        <button class="btn primary" id="reg-pdf">⬇ Download PDF</button>
+        <button class="btn" id="reg-add-sig">✍ Add signature</button>
+        <span class="hint" id="reg-status"></span>
+      </div>
+      <div class="reg-wrap">
+        <table id="reg-table">
+          <thead><tr>
+            <th>#</th><th>Name</th><th>Section</th><th>Emp #</th><th>Site</th>
+            <th>Sign-in time</th><th>Sign-in signature</th>
+            <th>Sign-out time</th><th>Sign-out signature</th>
+            <th>Notes</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="tab-sites" class="admin-tab" style="display:none"></div>
     <div id="tab-oncall" class="admin-tab" style="display:none"></div>
     <div id="tab-logs" class="admin-tab" style="display:none"></div>
     <div id="tab-people" class="admin-tab" style="display:none"></div>
@@ -1540,7 +1538,7 @@ const S = {
   gridView: "week",
   gt: { search: "", sort: "name-asc", date: todayISO(), status: "all" },
   oncall: [], requests: [], signins: [], training: [],
-  screen: "today", adminTab: "sites",
+  screen: "today", adminTab: "register",
 };
 const TYPE_CLASS = {
   "On-Call": "b-oncall", "Vacation": "b-vacation", "Reset": "b-reset",
@@ -1581,7 +1579,6 @@ async function loadBase() {
   Object.assign(S, { me, roster, settings, sites });
   $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • admin" : ""}`;
   $("#nav-approvals").style.display = me.is_approver ? "" : "none";
-  $("#nav-register").style.display = me.is_approver ? "" : "none";
   $("#nav-admin").style.display = me.is_approver ? "" : "none";
   const b = $("#banner");
   if (me.dev) { b.style.display = "block"; b.textContent = `DEV MODE — identity simulated: ${me.employee_number} (${me.email})`; }
@@ -1628,7 +1625,6 @@ function renderCurrent() {
   else if (S.screen === "requests") renderRequests();
   else if (S.screen === "shifts") renderShifts();
   else if (S.screen === "approvals") renderApprovals();
-  else if (S.screen === "register") renderRegisterScreen();
   else if (S.screen === "admin") renderAdmin();
 }
 
@@ -2064,6 +2060,7 @@ function renderAdmin() {
   else if (S.adminTab === "oncall") renderAdminOnCall();
   else if (S.adminTab === "logs") renderAdminLogs();
   else if (S.adminTab === "people") renderAdminPeople();
+  else if (S.adminTab === "register") renderRegisterScreen();
   else renderAdminSettings();
 }
 function renderAdminSites() {
@@ -2590,16 +2587,12 @@ function openRegSigPicker() {
   $("#pks-in").addEventListener("click", () => { const v = $("#pks-p").value; close(); if (v) openSigModal(v, "in"); });
   $("#pks-out").addEventListener("click", () => { const v = $("#pks-p").value; close(); if (v) openSigModal(v, "out"); });
 }
-// after a sign-in/out succeeds, ask the person to draw their signature for the register
-async function promptSignature(direction) {
-  try {
-    const d = todayISO();
-    const reg = await api(`/api/register?date=${d}`);
-    const e = String(S.me.employee_number);
-    const have = reg.sigs[e] && reg.sigs[e][direction] && reg.sigs[e][direction].data;
-    if (have) { toast("Register updated"); return; }
-    openSigModal(e, direction);
-  } catch (e2) { /* non-fatal — signature can still be added from the Register tab */ }
+// after a sign-in/out succeeds, ask the person to draw their signature for the register.
+// Always prompt — do NOT depend on the register API (if it fails, the signature can still be
+// saved from the Current-view register section).
+function promptSignature(direction) {
+  try { openSigModal(String(S.me.employee_number), direction); }
+  catch (e2) { console.warn("sig prompt failed", e2); }
 }
 async function regPdf() {
   if (!S_reg) return toast("Load a day first", "err");
