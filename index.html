@@ -245,7 +245,7 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { height: 22px; max-width: 110px; display: block; }
+#reg-table .sig-img { height: 24px; width: auto; display: block; background: #fff; padding: 2px 4px; border-radius: 4px; }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
@@ -262,7 +262,7 @@ table.grid.compact td.today-col { background: #19262e; }
 .sig-box { background: var(--panel, #0f1e38); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 100%; max-width: 440px; }
 .sig-title { font-weight: 700; margin-bottom: 10px; font-size: 14px; }
 .sig-canvas-wrap { border: 2px dashed var(--border); border-radius: 10px; background: #fff; overflow: hidden; }
-#sig-canvas { display: block; width: 100%; height: 160px; touch-action: none; cursor: crosshair; background: #fff; }
+#sig-canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; background: #fff; }
 .sig-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
 </style>
 
@@ -2644,7 +2644,9 @@ function openSigModal(emp, direction) {
   modal.style.display = "flex";
   const c = $("#sig-canvas");
   const wrap = c.parentElement;
-  const w = wrap.clientWidth || 400, h = 160;
+  // 4:1 aspect ratio (matches the PDF cell 96x24) so the signature you draw looks
+  // the same size/shape in the register and the PDF — no squish, no stretch.
+  const w = wrap.clientWidth || 400, h = Math.round(w / 4);
   const dpr = window.devicePixelRatio || 1;
   c.width = w * dpr; c.height = h * dpr;
   sigCtx = c.getContext("2d");
@@ -2734,18 +2736,16 @@ async function regPdf() {
       const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
       const siBy = {}, soBy = {};
       for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-      // drop permanently-excluded people; sort by ID number; STABLE numbering
-      // (rank in full roster by employee number) so hiding someone doesn't renumber the rest.
+      // drop permanently-excluded people; sort by ID number; number the VISIBLE rows 1..N
+      // (the first person shown is #1) — hidden people don't leave gaps.
       const exclSet = new Set((S_reg.exclude || []).map(String));
-      const allSorted = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
-      const numBy = {}; allSorted.forEach((p, i) => numBy[String(p.employee)] = i + 1);
-      const rows = allSorted.filter(p => !exclSet.has(String(p.employee)));
+      const rows = S_reg.roster.filter(p => !exclSet.has(String(p.employee))).sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
       const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
       const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
       const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
       const arName = (e) => (AR_NAMES[String(e)] || "");
       const headRow = "<th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("");
-      const bodyRows = rows.map((p) => {
+      const bodyRows = rows.map((p, i) => {
         const e = String(p.employee); const isVac = vacSet.has(e);
         const si = siBy[e], so = soBy[e]; const needsReview = !isVac && !(!!si && si.allowed);
         const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
@@ -2756,7 +2756,7 @@ async function regPdf() {
         const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
         const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
         return "<tr>" +
-          "<td class='ctr'>" + numBy[e] + "</td>" +
+          "<td class='ctr'>" + (i + 1) + "</td>" +
           '<td class="arname">' + nm + "</td>" +
           "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
           '<td class="ltr">' + esc(e) + "</td>" +
@@ -2781,8 +2781,8 @@ async function regPdf() {
         "#pdfpage thead th{font:bold 13px Arial;padding:6px 4px}" +
         "#pdfpage tbody tr{height:30px}#pdfpage tbody td{height:30px}" +
         "#pdfpage td.arname{font:bold 13px 'Segoe UI',Tahoma,Arial;text-align:center}" +
-        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:30px}" +
-        "#pdfpage .sigimg{max-height:24px;max-width:96px;display:block;margin:0 auto}" +
+        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:30px;background:#fff}" +
+        "#pdfpage .sigimg{width:96px;height:24px;object-fit:contain;display:block;margin:0 auto;background:#fff}" +
         "#pdfpage td.note{font-size:11px;line-height:1.35}";
       const pageHtml = '<div id="pdfpage" dir="rtl">' +
         '<div class="pg">' +
