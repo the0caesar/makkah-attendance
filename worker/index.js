@@ -492,9 +492,10 @@ async function handleApi(env, method, path, q, body, m) {
     // sign-ins for the day (day d in AST = (d-1)T21:00Z .. dT21:00Z)
     const dayPrev = new Date(new Date(d + "T00:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
     const sigR = await call(env, "GET",
-      `new_signins?$select=new_signin_name,new_signin_employeenumber,new_signin_datetime,new_signin_direction,new_signin_allowed,new_signin_site&$filter=(new_signin_datetime ge ${dayPrev}T21:00:00Z) and (new_signin_datetime le ${d}T20:59:59Z)&$orderby=new_signin_datetime asc&$top=10000`);
+      `new_signins?$select=new_signinid,new_signin_name,new_signin_employeenumber,new_signin_datetime,new_signin_direction,new_signin_allowed,new_signin_site&$filter=(new_signin_datetime ge ${dayPrev}T21:00:00Z) and (new_signin_datetime le ${d}T20:59:59Z)&$orderby=new_signin_datetime asc&$top=10000`);
     const signins = (sigR.status === 200 && isObj(sigR.body))
       ? (sigR.body.value || []).map((x) => ({
+          id: x.new_signinid,
           employee: x.new_signin_employeenumber, at: x.new_signin_datetime,
           direction: x.new_signin_direction === 100000001 ? "in" : "out",
           allowed: x.new_signin_allowed === 100000001, site: x.new_signin_site || "",

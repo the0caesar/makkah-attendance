@@ -255,6 +255,8 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table .reg-sigclear { margin-left: 6px; padding: 1px 6px; font-size: 10px; line-height: 1; vertical-align: middle; }
 #reg-table .reg-numcell { white-space: nowrap; width: 64px; }
 #reg-table .reg-num { display: inline-block; min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+#reg-table .reg-timecell { white-space: nowrap; }
+#reg-table .reg-edit { margin-left: 5px; padding: 1px 6px; font-size: 11px; line-height: 1; vertical-align: middle; }
 #reg-table .reg-vislab { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 5px; cursor: pointer; }
 #reg-table .reg-vis { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: var(--accent, #4cc2ff); }
 /* ---------- signature modal ---------- */
@@ -395,6 +397,27 @@ table.grid.compact td.today-col { background: #19262e; }
     </div>
   </div>
 
+  <!-- EDIT SIGN-IN (admin): time + site -->
+  <div id="editsig-modal" style="display:none">
+    <div class="sig-box">
+      <div class="sig-title" id="editsig-title">Edit sign-in</div>
+      <div style="display:flex;align-items:center;gap:10px;margin:10px 0">
+        <label style="font-size:13px;color:var(--muted)">Time (AST)</label>
+        <input type="time" id="editsig-time" style="flex:1;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:15px">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:10px 0">
+        <label style="font-size:13px;color:var(--muted)">Site</label>
+        <input type="text" id="editsig-site" list="editsig-sites" style="flex:1;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:14px">
+        <datalist id="editsig-sites"></datalist>
+      </div>
+      <div class="sig-actions">
+        <button class="btn ghost" id="editsig-delete">🗑 Delete this sign-in</button>
+        <button class="btn ghost" id="editsig-cancel">Cancel</button>
+        <button class="btn primary" id="editsig-save">Save changes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ADMIN -->
   <section id="screen-admin" class="screen" style="display:none">
     <h2>Admin</h2>
@@ -411,7 +434,6 @@ table.grid.compact td.today-col { background: #19262e; }
         <input type="date" id="reg-date">
         <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
         <button class="btn primary" id="reg-pdf">⬇ Download PDF</button>
-        <button class="btn" id="reg-add-sig">✍ Add signature</button>
         <span class="hint" id="reg-status"></span>
       </div>
       <div class="reg-wrap">
@@ -2568,9 +2590,9 @@ function renderRegister() {
       <td>${isVac ? "—" : REG_SECTION}</td>
       <td>${esc(e)}</td>
       <td>${esc(siteOf || "—")}</td>
-      <td class="time">${si ? esc(fmtClock(si.at)) : ""}</td>
+      <td class="reg-timecell time">${si ? esc(fmtClock(si.at)) : ""}${S.me.is_approver && si ? `<button class="btn ghost sm reg-edit" data-id="${esc(si.id)}" data-dir="in" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>
       <td class="reg-sigcell" data-emp="${e}" data-dir="in" title="Tap to add/edit sign-in signature">${sigIn ? `<img class="sig-img" src="${sigIn}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigIn ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="in" title="Remove this signature">✕</button>` : ""}</td>
-      <td class="time">${so ? esc(fmtClock(so.at)) : ""}</td>
+      <td class="reg-timecell time">${so ? esc(fmtClock(so.at)) : ""}${S.me.is_approver && so ? `<button class="btn ghost sm reg-edit" data-id="${esc(so.id)}" data-dir="out" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>
       <td class="reg-sigcell" data-emp="${e}" data-dir="out" title="Tap to add/edit sign-out signature">${sigOut ? `<img class="sig-img" src="${sigOut}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigOut ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="out" title="Remove this signature">✕</button>` : ""}</td>
       <td>${noteHtml}${remarkInput}${needsReview && S.me.is_approver ? `<button class="btn ghost sm" data-remark-save="${e}">Save remark</button>` : ""}</td>
     </tr>`;
@@ -2604,6 +2626,45 @@ function renderRegister() {
     }
     b.dataset.arm = "1"; b.textContent = "Confirm?";
     setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "✕"; } }, 3000);
+  }));
+  // ✎ edit time/site or delete a sign-in (admin only). Time input is HH:MM in AST.
+  $$("#reg-table .reg-edit").forEach(b => b.addEventListener("click", () => {
+    const rec = (S_reg.signins || []).find(x => x.id === b.dataset.id);
+    if (!rec) return toast("Sign-in not found", "err");
+    const dir = b.dataset.dir;
+    const m = $("#editsig-modal");
+    m.style.display = "flex";
+    $("#editsig-title").textContent = `Edit ${dir === "in" ? "sign-in" : "sign-out"} — ${S_reg.roster.find(x => String(x.employee) === String(rec.employee))?.name || rec.employee}`;
+    const hms = new Date(rec.at).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    $("#editsig-time").value = hms;
+    $("#editsig-site").value = rec.site || "";
+    const dl = $("#editsig-sites");
+    dl.innerHTML = "";
+    (S.sites || []).forEach(s => { const o = document.createElement("option"); o.value = s.name || s.id; dl.appendChild(o); });
+    let armDel = false;
+    const del = $("#editsig-delete");
+    del.onclick = async () => {
+      if (!armDel) { armDel = true; del.textContent = "Confirm delete?"; setTimeout(() => { if (del.isConnected) { armDel = false; del.textContent = "🗑 Delete this sign-in"; } }, 3000); return; }
+      del.textContent = "🗑 Delete this sign-in";
+      try {
+        await api("/api/admin/signins/delete", { method: "POST", body: { id: rec.id } });
+        m.style.display = "none";
+        toast("Sign-in deleted"); await loadRegister(S_reg.date); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+    };
+    $("#editsig-cancel").onclick = () => { m.style.display = "none"; };
+    $("#editsig-save").onclick = async () => {
+      const tm = $("#editsig-time").value; if (!tm) return toast("Enter a time", "err");
+      const [hh, mm] = tm.split(":");
+      // combine with the sign-in's date in AST, then emit a UTC ISO (worker stores it as-is)
+      const dt = new Date(astDayOffset(S_reg.date).getTime() + (parseInt(hh, 10) * 60 + parseInt(mm, 10) - 180) * 60000);
+      const payload = { id: rec.id, datetime: dt.toISOString(), site: $("#editsig-site").value.trim() };
+      try {
+        await api("/api/admin/signins/update", { method: "POST", body: payload });
+        m.style.display = "none";
+        toast("Sign-in updated"); await loadRegister(S_reg.date); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+    };
   }));
   // checkbox: checked = shown, unchecked = hidden — PERMANENT (all days). Admin only.
   $$("#reg-table .reg-vis").forEach(cb => cb.addEventListener("change", async () => {
@@ -2834,7 +2895,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#reg-date").addEventListener("change", () => { S_reg = null; renderRegisterScreen(); });
   $("#reg-refresh").addEventListener("click", () => { S_reg = null; renderRegisterScreen(); });
   $("#reg-pdf").addEventListener("click", () => regPdf());
-  $("#reg-add-sig").addEventListener("click", openRegSigPicker);
   $("#wk-prev").addEventListener("click", async () => {
     const x = new Date(S.weekStart);
     if (S.gridView === "year") x.setFullYear(x.getFullYear() - 1);
@@ -2886,7 +2946,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // half-drawn signature isn't wiped, and don't run overlapping requests.
   setInterval(async () => {
     if (document.hidden) return;
-    if ($("#sig-modal") && $("#sig-modal").style.display === "flex") return;
+    const sigModalOpen = $("#sig-modal") && $("#sig-modal").style.display === "flex";
+    const editModalOpen = $("#editsig-modal") && $("#editsig-modal").style.display === "flex";
+    if (sigModalOpen || editModalOpen) return;
     // Don't clobber a field the user is editing (e.g. typing a remark).
     const ae = document.activeElement;
     if (ae && ae.closest && ae.closest("#reg-table")) return;
