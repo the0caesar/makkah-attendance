@@ -235,7 +235,24 @@ async function handleApi(env, method, path, q, body, m) {
   const p = path.replace(/\/+$/, "");
   const g = (k, dflt) => (q[k] ? q[k][0] : dflt);
 
-  if (p === "/api/whoami") return m;
+  if (p === "/api/whoami") {
+    // signed_in: does this person have an open sign-in today (AST day)?
+    // Last allowed direction for today decides — "in" = signed in (can sign out),
+    // "out" or nothing = signed out (can sign in).
+    if (m && m.employee_number && m.linked) {
+      try {
+        const todayAST = new Date(Date.now() + AST_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+        const dayPrev = new Date(new Date(todayAST + "T00:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
+        const sr = await call(env, "GET",
+          `new_signins?$select=new_signin_datetime,new_signin_direction,new_signin_allowed&$filter=(new_signin_employeenumber eq '${String(m.employee_number).slice(0, 100)}') and (new_signin_datetime ge ${dayPrev}T21:00:00Z) and (new_signin_datetime le ${todayAST}T20:59:59Z)&$orderby=new_signin_datetime desc&$top=2`);
+        const rows = (sr.status === 200 && isObj(sr.body)) ? (sr.body.value || []) : [];
+        m.signed_in = rows.length > 0 && rows[0].new_signin_direction === DIR_IN && rows[0].new_signin_allowed === ALLOWED_YES;
+      } catch (e) { m.signed_in = false; }
+    } else if (m) {
+      m.signed_in = false;
+    }
+    return m;
+  }
 
   if (p === "/api/roster") {
     const r = await call(env, "GET",

@@ -1646,6 +1646,7 @@ async function loadBase() {
   $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • admin" : ""}`;
   $("#nav-approvals").style.display = me.is_approver ? "" : "none";
   $("#nav-admin").style.display = me.is_approver ? "" : "none";
+  setSignState();
   const b = $("#banner");
   if (me.dev) { b.style.display = "block"; b.textContent = `DEV MODE — identity simulated: ${me.employee_number} (${me.email})`; }
   else if (!me.linked) { b.style.display = "block"; b.textContent = "Your email is not linked to a roster person yet — an admin must link it in Admin → People."; }
@@ -2478,7 +2479,26 @@ function astMinutesNow() {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
   return parseInt(p.find(x => x.type === "hour").value, 10) * 60 + parseInt(p.find(x => x.type === "minute").value, 10);
 }
+// Sign In = green, Sign Out = red; only the action you're allowed to do is enabled.
+// (signed in -> can sign out; signed out -> can sign in)
+function setSignState() {
+  const signedIn = !!(S.me && S.me.signed_in);
+  const bi = $("#btn-signin"), bo = $("#btn-signout");
+  if (!bi || !bo) return;
+  bi.style.background = signedIn ? "" : "#1fa85a";
+  bi.style.borderColor = signedIn ? "" : "#1fa85a";
+  bo.style.background = signedIn ? "#d64545" : "";
+  bo.style.borderColor = signedIn ? "#d64545" : "";
+  bi.disabled = signedIn;          // already in -> can't sign in again
+  bo.disabled = !signedIn;         // not in -> can't sign out
+  bi.title = signedIn ? "You're already signed in" : "Sign in";
+  bo.title = signedIn ? "Sign out" : "You're not signed in";
+}
 async function doSign(direction) {
+  // Guard: only allow the transition that matches current state.
+  const signedIn = !!(S.me && S.me.signed_in);
+  if (direction === "in" && signedIn) return toast("You're already signed in", "err");
+  if (direction === "out" && !signedIn) return toast("You're not signed in", "err");
   const btn = direction === "in" ? $("#btn-signin") : $("#btn-signout");
   const verb = direction === "in" ? "Sign-in" : "Sign-out";
   btn.disabled = true;
@@ -2501,11 +2521,12 @@ async function doSign(direction) {
       direction, latitude: g.lat, longitude: g.lon, accuracy: g.acc,
     } });
     toast(direction === "in" ? `Signed in ✓ ${r.site}` : `Signed out ✓ ${r.site}`);
+    S.me.signed_in = direction === "in"; setSignState(); // flip the buttons immediately
     promptSignature(direction); // open the pad IMMEDIATELY (don't wait for the data refresh)
     refresh().catch(() => {});  // refresh data in the background
   } catch (e) {
     showAlert(verb + " blocked", humanizeSignError(e));
-  } finally { btn.disabled = false; }
+  } finally { btn.disabled = false; setSignState(); }
 }
 
 // ---------- daily register (admin) ----------
