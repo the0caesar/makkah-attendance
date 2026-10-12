@@ -251,6 +251,8 @@ table.grid.compact td.today-col { background: #19262e; }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
 .reg-remark { width: 100%; box-sizing: border-box; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; font: inherit; font-size: 12px; margin-top: 4px; }
 .reg-remark-by { font-size: 10px; color: var(--muted); margin-top: 3px; }
+#reg-table .reg-sigcell { position: relative; }
+#reg-table .reg-sigclear { margin-left: 6px; padding: 1px 6px; font-size: 10px; line-height: 1; vertical-align: middle; }
 /* ---------- signature modal ---------- */
 #sig-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .sig-box { background: var(--panel, #0f1e38); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 100%; max-width: 440px; }
@@ -382,7 +384,7 @@ table.grid.compact td.today-col { background: #19262e; }
       <div class="sig-title">Sign your name below</div>
       <div class="sig-canvas-wrap"><canvas id="sig-canvas"></canvas></div>
       <div class="sig-actions">
-        <button class="btn ghost" id="sig-clear">Clear</button>
+        <button class="btn ghost" id="sig-clear">✕ Clear</button>
         <button class="btn ghost" id="sig-cancel">Cancel</button>
         <button class="btn primary" id="sig-save">Save signature</button>
       </div>
@@ -2478,7 +2480,7 @@ function renderRegister() {
         ? `<span class="reg-flag">NEEDS REVIEW</span>` + (rem ? `<div class="reg-remark-by">${esc(rem.text)} — ${esc(String(rem.by).split("@")[0])}</div>` : "")
         : (rem ? `<span class="reg-note">${esc(rem.text)}</span>` : ""));
     const remarkInput = needsReview && S.me.is_approver
-      ? `<input class="reg-remark" data-emp="${e}" value="${esc(rem ? rem.text : "")}" placeholder="Admin remark (save with Save below)" onchange="void 0">`
+      ? `<input class="reg-remark" data-emp="${e}" value="${esc(rem ? rem.text : "")}" placeholder="Admin remark">`
       : "";
     return `<tr class="${isVac ? "vac" : needsReview ? "review" : ""}">
       <td>${i + 1}</td>
@@ -2487,17 +2489,16 @@ function renderRegister() {
       <td>${esc(e)}</td>
       <td>${esc(p.site || "—")}</td>
       <td class="time">${si ? esc(fmtClock(si.at)) : ""}</td>
-      <td class="reg-sigcell" data-emp="${e}" data-dir="in" title="Tap to add/edit sign-in signature">${sigIn ? `<img class="sig-img" src="${sigIn}" alt="">` : '<span class="reg-note">✍</span>'}</td>
+      <td class="reg-sigcell" data-emp="${e}" data-dir="in" title="Tap to add/edit sign-in signature">${sigIn ? `<img class="sig-img" src="${sigIn}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigIn ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="in" title="Remove this signature">✕</button>` : ""}</td>
       <td class="time">${so ? esc(fmtClock(so.at)) : ""}</td>
-      <td class="reg-sigcell" data-emp="${e}" data-dir="out" title="Tap to add/edit sign-out signature">${sigOut ? `<img class="sig-img" src="${sigOut}" alt="">` : '<span class="reg-note">✍</span>'}</td>
-      <td>${noteHtml}${remarkInput}<button class="btn ghost sm" data-remark-save="${e}" style="display:none">Save remark</button></td>
+      <td class="reg-sigcell" data-emp="${e}" data-dir="out" title="Tap to add/edit sign-out signature">${sigOut ? `<img class="sig-img" src="${sigOut}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigOut ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="out" title="Remove this signature">✕</button>` : ""}</td>
+      <td>${noteHtml}${remarkInput}${needsReview && S.me.is_approver ? `<button class="btn ghost sm" data-remark-save="${e}">Save remark</button>` : ""}</td>
     </tr>`;
   }).join("");
-  // show save buttons on changed remark inputs
+  // remark save (button always present on NEEDS REVIEW rows for admins)
   $$("#reg-table [data-remark-save]").forEach(b => {
     const inp = $(`#reg-table .reg-remark[data-emp="${b.dataset.remarkSave}"]`);
     if (!inp) return;
-    if (inp.value.trim()) b.style.display = "";
     b.addEventListener("click", async () => {
       try {
         await api("/api/register/remark", { method: "POST", body: { date: S_reg.date, employee: b.dataset.remarkSave, text: inp.value.trim() } });
@@ -2508,6 +2509,15 @@ function renderRegister() {
   // clickable signature cells (admin adds/edits any person's signature from the register)
   $$("#reg-table .reg-sigcell").forEach(td => td.addEventListener("click", () => {
     openSigModal(td.dataset.emp, td.dataset.dir);
+  }));
+  // ✕ clear a signature (admin only) — stopPropagation so the cell doesn't re-open the modal
+  $$("#reg-table .reg-sigclear").forEach(b => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (!confirm("Remove this signature?")) return;
+    try {
+      await api(`/api/register/sig?date=${S_reg.date}&employee=${encodeURIComponent(b.dataset.emp)}&direction=${b.dataset.dir}`, { method: "DELETE" });
+      toast("Signature removed"); await loadRegister(S_reg.date); renderRegister();
+    } catch (e) { toast(e.message, "err"); }
   }));
   $("#reg-status").textContent = `${dayLabel} • ${rows.length} staff • ${rows.filter(p => vacSet.has(String(p.employee))).length} on vacation`;
 }
@@ -2535,6 +2545,10 @@ function openSigModal(emp, direction) {
   c.width = w * dpr; c.height = h * dpr;
   sigCtx = c.getContext("2d");
   sigCtx.scale(dpr, dpr);
+  // paint a white background into the BITMAP (CSS white is not part of the exported PNG,
+  // so without this the ink is invisible on the dark table / white PDF needs a base too)
+  sigCtx.fillStyle = "#ffffff";
+  sigCtx.fillRect(0, 0, w, h);
   sigCtx.lineWidth = 2.4; sigCtx.lineCap = "round"; sigCtx.lineJoin = "round";
   sigCtx.strokeStyle = "#111";
   sigDirty = false;
@@ -2602,21 +2616,28 @@ async function regPdf() {
   // A4 portrait — the Excel template is a portrait RTL sheet
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const W = 595, H = 842;
-  // Embed Amiri (Regular + Bold) — the template is in Arabic
+  // Embed Amiri (Regular + Bold) — the template is in Arabic. Fallback to Helvetica if fonts fail.
   const loadFont = async (file, name, style) => {
-    const fr = await fetch(file);
-    const buf = new Uint8Array(await fr.arrayBuffer());
-    let bin = ""; for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 8192));
-    doc.addFileToVFS(file, btoa(bin));
-    doc.addFont(file, name, style);
+    try {
+      const fr = await fetch(file);
+      if (!fr.ok) return false;
+      const buf = new Uint8Array(await fr.arrayBuffer());
+      let bin = ""; for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 8192));
+      doc.addFileToVFS(file, btoa(bin));
+      doc.addFont(file, name, style);
+      return true;
+    } catch (e) { console.warn("font load failed", file, e); return false; }
   };
-  try { await loadFont("arabic.ttf", "Amiri", "normal"); } catch (e) { console.warn("Amiri regular", e); }
-  try { await loadFont("amiri-bold.ttf", "Amiri", "bold"); } catch (e) { console.warn("Amiri bold", e); }
+  const F_REG = await loadFont("arabic.ttf", "Amiri", "normal");
+  const F_BOLD = await loadFont("amiri-bold.ttf", "Amiri", "bold");
   const setAR = (size, bold) => {
     doc.setFontSize(size);
-    if (bold) { try { doc.setFont("Amiri", "bold"); return; } catch (e) { /* fall through */ } }
-    doc.setFont("Amiri", "normal");
+    if (F_REG) {
+      if (bold) { if (F_BOLD) { try { doc.setFont("Amiri", "bold"); return; } catch (e) { /* fall through */ } } doc.setFont("Amiri", "normal"); return; }
+    }
+    doc.setFont("helvetica", bold ? "bold" : "normal");
   };
+  try {
   const d = S_reg.date;
   const dayObj = new Date(astDayOffset(d).getTime() + 3 * 3600000);
   const dayName = dayObj.toLocaleDateString("ar-SA-u-ca-gregory", { weekday: "long", timeZone: "UTC" });
@@ -2712,6 +2733,10 @@ async function regPdf() {
   doc.text(`Protection Portal — ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Riyadh" })} AST`, 24, tableBottom + 14);
   doc.save(`attendance-register-${d}.pdf`);
   toast("PDF downloaded");
+  } catch (e) {
+    console.error("regPdf failed", e);
+    toast("PDF failed: " + (e && e.message ? e.message : e), "err");
+  }
 }
 
 // ---------- wire up ----------

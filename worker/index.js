@@ -538,6 +538,22 @@ async function handleApi(env, method, path, q, body, m) {
     await kv.put("day:" + d, JSON.stringify(reg));
     return { ok: true };
   }
+  if (p === "/api/register/sig" && method === "DELETE") {
+    if (!kv) return [{ error: "kv unbound" }, 500];
+    if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
+    const d = regDate((q.date && q.date[0]) || "");
+    const emp = String((q.employee && q.employee[0]) || "").trim();
+    const dir = (q.direction && q.direction[0]) === "out" ? "out" : "in";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !emp) return [{ error: "date + employee required" }, 400];
+    const raw = await kv.get("day:" + d) || "{}";
+    let reg; try { reg = JSON.parse(raw); } catch (e) { reg = {}; }
+    if (reg.sigs && reg.sigs[emp] && reg.sigs[emp][dir]) {
+      delete reg.sigs[emp][dir];
+      if (!Object.keys(reg.sigs[emp]).length) delete reg.sigs[emp];
+      await kv.put("day:" + d, JSON.stringify(reg));
+    }
+    return { ok: true };
+  }
   if (p === "/api/register/remark" && method === "POST") {
     if (!kv) return [{ error: "kv unbound" }, 500];
     if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
