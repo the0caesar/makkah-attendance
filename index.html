@@ -1264,6 +1264,23 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const TZ = "Asia/Riyadh"; // AST
 
+// Network observability: log every fetch to the debug banner so a hanging or
+// failing request is visible (which URL, status, ms). Only logs when the
+// banner is present (i.e. boot is in progress), to avoid noise in steady state.
+(() => {
+  const raw = window.fetch;
+  window.fetch = function (u, opts) {
+    let p = raw.apply(this, arguments);
+    if (window.__dbg && $("#dbg-banner")) {
+      const t0 = Date.now();
+      const url = (u && u.url) || u;
+      p = p.then(r => { dbg("net OK " + (r.status) + " " + Math.round(Date.now() - t0) + "ms " + String(url).replace(API_BASE, "")); return r; },
+        e => { dbg("net FAIL " + Math.round(Date.now() - t0) + "ms " + String(url).replace(API_BASE, "") + " :: " + (e && e.message || e)); throw e; });
+    }
+    return p;
+  };
+})();
+
 function toast(msg, kind = "ok") {
   const t = $("#toast");
   t.textContent = msg;
@@ -1272,6 +1289,22 @@ function toast(msg, kind = "ok") {
   clearTimeout(t._h);
   t._h = setTimeout(() => (t.style.display = "none"), 4000);
 }
+// Persistent debug banner: shows the exact boot stage so a stuck/failed load
+// is visible on-screen instead of a blank body. Removed by dbgDone() on success.
+function dbg(stage, extra) {
+  window.__dbg = true;
+  window.__dbglog = window.__dbglog || [];
+  window.__dbglog.push(stage + (extra ? " — " + extra : "") + " (" + new Date().toLocaleTimeString("en-GB") + ")");
+  let d = $("#dbg-banner");
+  if (!d) {
+    d = document.createElement("div");
+    d.id = "dbg-banner";
+    d.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:99999;background:#7f1d1d;color:#fff;font:11px/1.45 monospace;padding:8px 10px;border:1px solid #f87171;border-radius:8px;max-width:74vw;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5)";
+    document.body.appendChild(d);
+  }
+  d.textContent = "[PP] " + window.__dbglog.slice(-8).join("\n");
+}
+function dbgDone() { const d = $("#dbg-banner"); if (d) d.remove(); window.__dbglog = []; }
 // Big confirm alert (in-page — native dialogs are suppressed inside the Teams iframe).
 function showAlert(title, msg, icon = "⛔") {
   let ov = $("#alert-overlay");
@@ -2782,6 +2815,7 @@ async function regPdf() {
 
 // ---------- wire up ----------
 document.addEventListener("DOMContentLoaded", async () => {
+  dbg("boot: DOM ready");
   $$("#nav button").forEach(b => b.addEventListener("click", () => showScreen(b.dataset.screen)));
   $("#btn-signin").addEventListener("click", () => doSign("in"));
   $("#btn-signout").addEventListener("click", () => doSign("out"));
@@ -2842,15 +2876,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (API_BASE) {
     // Guard the sign-in handshake: if the Teams SSO token never resolves (a known
     // stall), don't hang on the shell forever — fall through to the sign-in screen.
+    dbg("boot: acquiring sign-in (15s guard)");
     const tok = await Promise.race([
       ensureAuth(),
       new Promise(res => setTimeout(() => { AUTH_ERR = "sign-in timed out — please retry"; res(null); }, 15000)),
     ]);
-    if (!tok) { showAuthScreen("login"); return; }
+    if (!tok) { dbg("boot: sign-in FAILED — " + (AUTH_ERR || "no token"), "showing login"); showAuthScreen("login"); return; }
+    dbg("boot: sign-in OK");
   }
   try {
+    dbg("boot: loading data (roster/sign-ins)");
     await refreshAll();
+    dbgDone();
   } catch (e) {
+    dbg("boot: DATA ERROR — " + (e.message || e) + " (code " + (e.code || "?") + ")");
     if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
     if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
