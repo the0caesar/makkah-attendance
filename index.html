@@ -2599,44 +2599,70 @@ async function regPdf() {
   if (typeof jspdf === "undefined" || !window.jspdf || !window.jspdf.jsPDF) return toast("PDF engine not loaded", "err");
   const { jsPDF } = window.jspdf;
   toast("Building PDF…");
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" }); // 842 x 595
-  // embed Amiri for Arabic (section + title)
-  try {
-    const fr = await fetch("arabic.ttf");
+  // A4 portrait — the Excel template is a portrait RTL sheet
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const W = 595, H = 842;
+  // Embed Amiri (Regular + Bold) — the template is in Arabic
+  const loadFont = async (file, name, style) => {
+    const fr = await fetch(file);
     const buf = new Uint8Array(await fr.arrayBuffer());
     let bin = ""; for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 8192));
-    doc.addFileToVFS("Amiri.ttf", btoa(bin));
-    doc.addFont("Amiri.ttf", "Amiri", "normal");
-    doc.setFont("Amiri");
-  } catch (e) { /* fall back to helvetica for the title */ }
+    doc.addFileToVFS(file, btoa(bin));
+    doc.addFont(file, name, style);
+  };
+  try { await loadFont("arabic.ttf", "Amiri", "normal"); } catch (e) { console.warn("Amiri regular", e); }
+  try { await loadFont("amiri-bold.ttf", "Amiri", "bold"); } catch (e) { console.warn("Amiri bold", e); }
+  const setAR = (size, bold) => {
+    doc.setFontSize(size);
+    if (bold) { try { doc.setFont("Amiri", "bold"); return; } catch (e) { /* fall through */ } }
+    doc.setFont("Amiri", "normal");
+  };
   const d = S_reg.date;
-  const dayLabel = new Date(astDayOffset(d).getTime() + 3 * 3600000).toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+  const dayObj = new Date(astDayOffset(d).getTime() + 3 * 3600000);
+  const dayName = dayObj.toLocaleDateString("ar-SA-u-ca-gregory", { weekday: "long", timeZone: "UTC" });
+  const dateStr = dayObj.toLocaleDateString("ar-SA-u-ca-gregory", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
   const siBy = {}, soBy = {};
   for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
   const rows = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
-  // column layout (pt), total 842
-  const X = [18, 38, 150, 225, 285, 345, 400, 500, 555, 655, 755]; // left edges of 10 cols
-  const CW = [20, 112, 60, 60, 55, 100, 55, 100, 55, 71];
-  const top0 = 108, RH = 26, H = 595;
-  const drawHead = (title, sub) => {
-    doc.setFont("Amiri", "normal"); doc.setFontSize(13);
-    doc.text("Daily Attendance Signature Register — Protection & Testing Division", 421, 30, { align: "center" });
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.text(`Day: ${title}    Date: ${sub}`, 421, 48, { align: "center" });
-    doc.setDrawColor(80); doc.setLineWidth(0.8); doc.line(18, 60, 824, 60);
-  };
-  const drawHeaderRow = (y) => {
-    doc.setFillColor(235, 235, 245); doc.rect(18, y - 14, 806, 18, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5);
-    const heads = ["#", "Name", "Section", "Emp #", "Site", "Sign-in time", "Sign-in sig.", "Sign-out time", "Sign-out sig.", "Notes"];
-    heads.forEach((h, i) => doc.text(h, X[i] + 2, y - 3));
-    return y + 4;
-  };
-  drawHead(dayLabel.split("•")[0].trim(), d);
-  let y = drawHeaderRow(80);
-  const ensurePage = () => { if (y + RH > H - 40) { doc.addPage(); drawHead(dayLabel, d); y = drawHeaderRow(80); } };
-  // preload signature images
+  // ---- Column geometry ----
+  // Template sheet is RTL: A prints at the RIGHT edge, J at the LEFT.
+  // So page order left→right: J I H G F E D C B A.
+  // Widths: template Excel char widths (A 8.4, B 41.6, C 30.7, D 15.4, E 27.1, F 12.9, G 30.7, H 27.1, I 36.6, J 8.4)
+  // scaled (x5.25pt then x0.437) to fit 547pt between 24pt margins.
+  const COLS = [
+    { k: "J", w: 19 }, { k: "I", w: 84 }, { k: "H", w: 62 }, { k: "G", w: 70 }, { k: "F", w: 30 },
+    { k: "E", w: 62 }, { k: "D", w: 36 }, { k: "C", w: 70 }, { k: "B", w: 95 }, { k: "A", w: 19 },
+  ];
+  let cx = 24;
+  const RX = {}, CC = {};
+  for (const c of COLS) { CC[c.k] = cx + c.w / 2; RX[c.k] = cx + c.w; cx += c.w; }
+  const TITLE_H = 24, DATE_H = 18, HDR_H = 16, ROW_H = 16;
+  const line = (yy, x1, x2) => { doc.setDrawColor(90); doc.setLineWidth(0.3); doc.line(x1, yy, x2, yy); };
+  const vline = (x, y1, y2) => { doc.setDrawColor(90); doc.setLineWidth(0.3); doc.line(x, y1, x, y2); };
+  // ===== Row 1: title (bold, centered, Arabic) =====
+  let y = 30;
+  setAR(15, true);
+  doc.text("سجل توقيع الحضور اليومي لموظفي دائرة الحماية والإختبارات", W / 2, y + 8, { align: "center" });
+  y += TITLE_H;
+  line(y, 24, W - 24);
+  // ===== Row 2: اليوم / التاريخ =====
+  setAR(10, false);
+  doc.text("اليوم :", RX["D"], y + 10, { align: "right" });
+  doc.text(dayName, RX["D"] - 2, y + 10, { align: "left" });
+  doc.text("التاريخ :", RX["F"], y + 10, { align: "right" });
+  doc.text(dateStr, RX["F"] - 2, y + 10, { align: "left" });
+  y += DATE_H;
+  line(y, 24, W - 24);
+  // ===== Row 3: header (Arabic, same words as the template) =====
+  doc.setFillColor(238, 238, 238); doc.rect(24, y, W - 48, HDR_H, "F");
+  const heads = { A: "#", B: "الاسم", C: "القسم", D: "الرقم الوظيفي", E: "الموقع", F: "وقت الحضور", G: "توقيع الحضور", H: "وقت الانصراف", I: "توقيع اللانصراف", J: "ملاحظات" };
+  setAR(8, false);
+  for (const k of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]) doc.text(heads[k], CC[k], y + 10.5, { align: "center" });
+  y += HDR_H;
+  line(y, 24, W - 24);
+  // ===== Rows 4..35: 32 numbered rows, thin grid (template has exactly 32 rows) =====
+  const TABLE_TOP = y, N_ROWS = 32, tableBottom = TABLE_TOP + N_ROWS * ROW_H;
   const imgCache = {};
   for (const p of rows) {
     const e = String(p.employee);
@@ -2644,45 +2670,46 @@ async function regPdf() {
     if (si && si.data) imgCache[e + ":in"] = si.data;
     if (so && so.data) imgCache[e + ":out"] = so.data;
   }
+  for (let i = 0; i <= N_ROWS; i++) line(TABLE_TOP + i * ROW_H, 24, W - 24);
+  for (const c of COLS) vline(RX[c.k], TABLE_TOP, tableBottom);
+  vline(24, TABLE_TOP, tableBottom);
+  const colW = {}; COLS.forEach(c => (colW[c.k] = c.w));
+  const putSig = (data, k, ry) => {
+    if (!data) return;
+    try {
+      const w = colW[k] - 10, h = ROW_H - 5;
+      doc.addImage(data, "PNG", CC[k] - w / 2, ry + (ROW_H - h) / 2, w, h);
+    } catch (e2) { /* ignore one bad image */ }
+  };
   rows.forEach((p, i) => {
-    ensurePage();
     const e = String(p.employee);
     const isVac = vacSet.has(e);
     const si = siBy[e], so = soBy[e];
-    doc.setDrawColor(170); doc.setLineWidth(0.4);
-    doc.rect(18, y - 13, 806, RH);
-    if (isVac) { doc.setFillColor(255, 244, 214); doc.rect(18, y - 13, 806, RH, "F"); }
-    else if (!si) { doc.setFillColor(250, 226, 226); doc.rect(18, y - 13, 806, RH, "F"); doc.setDrawColor(170); doc.rect(18, y - 13, 806, RH); }
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-    doc.text(String(i + 1), X[0] + 2, y + 2);
-    doc.setFont("helvetica", "bold");
-    doc.text(String(p.name || "").slice(0, 20), X[1] + 2, y + 2);
-    doc.setFont("helvetica", "normal");
-    doc.text(isVac ? "—" : "Protection", X[2] + 2, y + 2);
-    doc.text(e, X[3] + 2, y + 2);
-    doc.text(String(p.site || "—").slice(0, 16), X[4] + 2, y + 2);
-    doc.text(si ? fmtClock(si.at) : "", X[5] + 2, y + 2);
-    doc.text(so ? fmtClock(so.at) : "", X[7] + 2, y + 2);
-    // signatures
-    const putSig = (key, colX) => {
-      const data = imgCache[key];
-      if (!data) return;
-      try {
-        const img = new Image();
-        const pw = 92, ph = 22;
-        doc.addImage(data, "PNG", colX + 2, y - 11, pw, ph);
-      } catch (e2) { /* ignore one bad image */ }
-    };
-    putSig(e + ":in", X[6]);
-    putSig(e + ":out", X[8]);
-    // notes
-    if (isVac) { doc.setFontSize(8); doc.text("Vacation", X[9] + 2, y + 2); }
-    else if (!si) { doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.text("NEEDS REVIEW", X[9] + 2, y - 2); const rem = S_reg.remarks[e]; if (rem) { doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.text(String(rem.text).slice(0, 44), X[9] + 2, y + 5); } }
-    else if (S_reg.remarks[e]) { doc.setFontSize(6.5); doc.text(String(S_reg.remarks[e].text).slice(0, 44), X[9] + 2, y + 2); }
-    y += RH;
+    const ry = TABLE_TOP + i * ROW_H;
+    if (isVac) { doc.setFillColor(255, 247, 224); doc.rect(24, ry, W - 48, ROW_H, "F"); }
+    else if (!si || !si.allowed) { doc.setFillColor(252, 230, 230); doc.rect(24, ry, W - 48, ROW_H, "F"); }
+    setAR(8, false);
+    doc.text(String(i + 1), CC["A"], ry + 10.5, { align: "center" });
+    doc.text(String(p.name || ""), CC["B"], ry + 10.5, { align: "center" });
+    doc.text(isVac ? "—" : REG_SECTION, CC["C"], ry + 10.5, { align: "center" });
+    doc.text(e, CC["D"], ry + 10.5, { align: "center" });
+    doc.text(String(p.site || "—"), CC["E"], ry + 10.5, { align: "center" });
+    doc.text(si ? fmtClock(si.at) : "", CC["F"], ry + 10.5, { align: "center" });
+    doc.text(so ? fmtClock(so.at) : "", CC["H"], ry + 10.5, { align: "center" });
+    putSig(imgCache[e + ":in"], "G", ry);
+    putSig(imgCache[e + ":out"], "I", ry);
+    // Notes (J)
+    if (isVac) { doc.text("إجازة", CC["J"], ry + 10.5, { align: "center" }); }
+    else if (!si || !si.allowed) {
+      doc.text("يحتاج مراجعة", CC["J"], ry + 7, { align: "center" });
+      const rem = S_reg.remarks[e];
+      if (rem && rem.text) { setAR(6, false); doc.text(String(rem.text).slice(0, 40), CC["J"], ry + 13.5, { align: "center" }); }
+    } else if (S_reg.remarks[e] && S_reg.remarks[e].text) {
+      setAR(6, false); doc.text(String(S_reg.remarks[e].text).slice(0, 40), CC["J"], ry + 10.5, { align: "center" });
+    }
   });
-  doc.setFont("helvetica", "italic"); doc.setFontSize(7);
-  doc.text(`Generated by Protection Portal — ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Riyadh" })} AST`, 18, H - 18);
+  setAR(7, false);
+  doc.text(`Protection Portal — ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Riyadh" })} AST`, 24, tableBottom + 14);
   doc.save(`attendance-register-${d}.pdf`);
   toast("PDF downloaded");
 }
