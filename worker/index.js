@@ -515,7 +515,44 @@ async function handleApi(env, method, path, q, body, m) {
       const raw = await kv.get("day:" + d);
       if (raw) { try { reg = JSON.parse(raw); } catch (e) { reg = null; } }
     }
-    return { date: d, roster, signins, vacations, sigs: (reg && reg.sigs) || {}, remarks: (reg && reg.remarks) || {} };
+    let excl = null;
+    if (kv) {
+      const eraw = await kv.get("reg.exclude");
+      if (eraw) { try { excl = JSON.parse(eraw); } catch (e) { excl = null; } }
+    }
+    return { date: d, roster, signins, vacations, sigs: (reg && reg.sigs) || {}, remarks: (reg && reg.remarks) || {}, hidden: (reg && reg.hidden) || [], exclude: Array.isArray(excl) ? excl : [] };
+  }
+  // GLOBAL exclude list (permanent, all days): checkbox off = person excluded from register + PDF forever.
+  if (p === "/api/register/exclude" && method === "POST") {
+    if (!kv) return [{ error: "kv unbound" }, 500];
+    if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
+    const b = body || {};
+    const emp = String(b.employee || "").trim();
+    const show = b.show !== false; // show=true -> include; show=false -> exclude
+    if (!emp) return [{ error: "employee required" }, 400];
+    const raw = await kv.get("reg.exclude") || "[]";
+    let excl; try { excl = JSON.parse(raw); } catch (e) { excl = []; }
+    if (!Array.isArray(excl)) excl = [];
+    if (show) excl = excl.filter(x => String(x) !== emp);
+    else if (excl.indexOf(emp) === -1) excl.push(emp);
+    await kv.put("reg.exclude", JSON.stringify(excl));
+    return { ok: true, exclude: excl };
+  }
+  if (p === "/api/register/hidden" && method === "POST") {
+    if (!kv) return [{ error: "kv unbound" }, 500];
+    if (!m.is_approver) return [{ error: "forbidden: admin only" }, 403];
+    const b = body || {};
+    const d = regDate(b.date);
+    const emp = String(b.employee || "").trim();
+    const act = b.action === "remove" ? "remove" : "add"; // "remove" = keep hidden, "add" = show again
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !emp) return [{ error: "date + employee required" }, 400];
+    const raw = await kv.get("day:" + d) || "{}";
+    let reg; try { reg = JSON.parse(raw); } catch (e) { reg = {}; }
+    reg.hidden = reg.hidden || [];
+    if (act === "add") reg.hidden = reg.hidden.filter(x => x !== emp);
+    else if (reg.hidden.indexOf(emp) === -1) reg.hidden.push(emp);
+    await kv.put("day:" + d, JSON.stringify(reg));
+    return { ok: true, hidden: reg.hidden };
   }
   if (p === "/api/register/sig" && method === "POST") {
     if (!kv) return [{ error: "kv unbound" }, 500];
@@ -912,7 +949,7 @@ export default {
     }
     if (url.pathname.startsWith("/app/")) {
       const name = url.pathname.slice(5);
-      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true, "geo.html": true, "jspdf.umd.min.js": true, "html2canvas.min.js": true, "arabic.ttf": true, "amiri-bold.ttf": true };
+      const ALLOWED = { "": true, "index.html": true, "app.js": true, "style.css": true, "teams.js": true, "msal-browser.min.js": true, "geo.html": true, "jspdf.umd.min.js": true, "html2canvas.min.js": true, "arabic.ttf": true, "amiri-bold.ttf": true, "logo_ngsa.jpeg": true };
       if (!ALLOWED[name]) return json({ error: "not found" }, 404, cors);
       const f = await fetch(`https://the0caesar.github.io/makkah-attendance/${name}`, { cf: { cacheTtl: 0 } });
       const h = new Headers(f.headers);

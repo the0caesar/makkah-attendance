@@ -253,6 +253,10 @@ table.grid.compact td.today-col { background: #19262e; }
 .reg-remark-by { font-size: 10px; color: var(--muted); margin-top: 3px; }
 #reg-table .reg-sigcell { position: relative; }
 #reg-table .reg-sigclear { margin-left: 6px; padding: 1px 6px; font-size: 10px; line-height: 1; vertical-align: middle; }
+#reg-table .reg-numcell { white-space: nowrap; width: 64px; }
+#reg-table .reg-num { display: inline-block; min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+#reg-table .reg-vislab { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 5px; cursor: pointer; }
+#reg-table .reg-vis { width: 15px; height: 15px; margin: 0; cursor: pointer; accent-color: var(--accent, #4cc2ff); }
 /* ---------- signature modal ---------- */
 #sig-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .sig-box { background: var(--panel, #0f1e38); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 100%; max-width: 440px; }
@@ -2529,11 +2533,14 @@ function renderRegister() {
     const e = String(s.employee);
     if (s.direction === "in") siBy[e] = s; else soBy[e] = s;
   }
-  const hiddenSet = new Set((S_reg.hidden || []).map(String));
-  const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee)));
-  rows.sort((a, b) => String(a.employee).localeCompare(String(b.employee)));
+  // Permanent exclude list (all days). Number is STABLE: it's each person's rank in
+  // the full roster sorted by employee number, so hiding someone never renumbers the rest.
+  const hiddenSet = new Set((S_reg.exclude || []).map(String));
+  const allSorted = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
+  const numBy = {}; allSorted.forEach((p, i) => numBy[String(p.employee)] = i + 1);
+  const rows = allSorted.filter(p => !hiddenSet.has(String(p.employee)));
   const dayLabel = new Date(astDayOffset(d).getTime() + 3 * 3600000).toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
-  tbody.innerHTML = rows.map((p, i) => {
+  tbody.innerHTML = rows.map((p) => {
     const e = String(p.employee);
     const isVac = vacSet.has(e);
     const si = siBy[e], so = soBy[e];
@@ -2552,9 +2559,12 @@ function renderRegister() {
     const remarkInput = needsReview && S.me.is_approver
       ? `<input class="reg-remark" data-emp="${e}" value="${esc(rem ? rem.text : "")}" placeholder="Admin remark">`
       : "";
-    const hideBtn = S.me.is_approver ? ` <button class="btn ghost sm reg-hide" data-emp="${e}" title="Hide from register/PDF (this day)">–</button>` : "";
+    // checkbox: checked = shown, unchecked = hidden (permanent, all days) — admin only
+    const visBox = S.me.is_approver
+      ? `<label class="reg-vislab" title="Checked = shown, unchecked = hidden (permanent, all days)"><input type="checkbox" class="reg-vis" data-emp="${e}" ${!hiddenSet.has(e) ? "checked" : ""}></label>`
+      : "";
     return `<tr class="${isVac ? "vac" : needsReview ? "review" : ""}">
-      <td>${i + 1}${hideBtn}</td>
+      <td class="reg-numcell">${visBox}<span class="reg-num">${numBy[e]}</span></td>
       <td><b>${esc(p.name)}</b></td>
       <td>${isVac ? "—" : REG_SECTION}</td>
       <td>${esc(e)}</td>
@@ -2596,38 +2606,24 @@ function renderRegister() {
     b.dataset.arm = "1"; b.textContent = "Confirm?";
     setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "✕"; } }, 3000);
   }));
-  // – hide a person from this day's register/PDF (admin only)
-  $$("#reg-table .reg-hide").forEach(b => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    // two-step: native confirm() is suppressed inside the Teams iframe
-    if (b.dataset.arm) {
-      delete b.dataset.arm; b.textContent = "–";
-      try {
-        await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.emp, action: "remove" } });
-        toast("Hidden from this day"); await loadRegister(S_reg.date); renderRegister();
-      } catch (e) { toast(e.message, "err"); }
-      return;
-    }
-    b.dataset.arm = "1"; b.textContent = "Confirm?"; b.title = "Click again to hide this person from today's register & PDF";
-    setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "–"; b.title = ""; } }, 3000);
+  // checkbox: checked = shown, unchecked = hidden — PERMANENT (all days). Admin only.
+  $$("#reg-table .reg-vis").forEach(cb => cb.addEventListener("change", async () => {
+    try {
+      await api("/api/register/exclude", { method: "POST", body: { employee: cb.dataset.emp, show: cb.checked } });
+      toast(cb.checked ? "Shown in register" : "Hidden from register (all days)");
+      await loadRegister(S_reg.date); renderRegister();
+    } catch (e) { toast(e.message, "err"); cb.checked = !cb.checked; }
   }));
-  // restore strip: list of hidden people (this day) so an admin can un-hide them
+  // strip: people currently excluded (all days) so an admin can see them
   const strip = $("[data-reg-hidden-strip]");
   if (strip && S.me.is_approver) {
-    const hidden = S_reg.hidden || [];
-    strip.innerHTML = hidden.length
+    const excl = (S_reg.exclude || []).map(String);
+    strip.innerHTML = excl.length
       ? `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,.2);border-radius:8px;font-size:12.5px">
-          <b>Hidden this day:</b> ${hidden.map(h => { const p = S.roster.find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} (<button class="btn ghost sm" data-unhide="${esc(h)}" style="margin-left:4px;padding:1px 8px">show</button>)`; }).join(" · ")}
-        </div>`
+          <b>Not shown (all days):</b> ${excl.map(h => { const p = (S_reg.roster || []).find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} <span style="opacity:.6">(#${esc(h)})</span>`; }).join(" · ")} — tick their box again to show them.</div>`
       : "";
-    $$("[data-reg-hidden-strip] [data-unhide]").forEach(b => b.addEventListener("click", async () => {
-      try {
-        await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.unhide, action: "add" } });
-        toast("Shown again"); await loadRegister(S_reg.date); renderRegister();
-      } catch (e) { toast(e.message, "err"); }
-    }));
   }
-  $("#reg-status").textContent = `${dayLabel} • ${rows.length} staff • ${rows.filter(p => vacSet.has(String(p.employee))).length} on vacation`;
+  $("#reg-status").textContent = `${dayLabel} • ${rows.length} staff • ${rows.filter(p => vacSet.has(String(p.employee))).length} on vacation` + ((S_reg.exclude || []).length ? ` • ${(S_reg.exclude || []).length} not shown` : "");
 }
 function renderRegisterScreen() {
   const input = $("#reg-date");
@@ -2738,15 +2734,18 @@ async function regPdf() {
       const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
       const siBy = {}, soBy = {};
       for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-      // sort by ID number (numeric), like the Excel sheet; drop people hidden for this day
-      const hiddenSet = new Set((S_reg.hidden || []).map(String));
-      const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee))).sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
+      // drop permanently-excluded people; sort by ID number; STABLE numbering
+      // (rank in full roster by employee number) so hiding someone doesn't renumber the rest.
+      const exclSet = new Set((S_reg.exclude || []).map(String));
+      const allSorted = S_reg.roster.slice().sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
+      const numBy = {}; allSorted.forEach((p, i) => numBy[String(p.employee)] = i + 1);
+      const rows = allSorted.filter(p => !exclSet.has(String(p.employee)));
       const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
       const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
       const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
       const arName = (e) => (AR_NAMES[String(e)] || "");
       const headRow = "<th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("");
-      const bodyRows = rows.map((p, i) => {
+      const bodyRows = rows.map((p) => {
         const e = String(p.employee); const isVac = vacSet.has(e);
         const si = siBy[e], so = soBy[e]; const needsReview = !isVac && !(!!si && si.allowed);
         const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
@@ -2757,7 +2756,7 @@ async function regPdf() {
         const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
         const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
         return "<tr>" +
-          "<td class='ctr'>" + (i + 1) + "</td>" +
+          "<td class='ctr'>" + numBy[e] + "</td>" +
           '<td class="arname">' + nm + "</td>" +
           "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
           '<td class="ltr">' + esc(e) + "</td>" +
