@@ -2501,31 +2501,42 @@ async function doSign(direction) {
   const btn = direction === "in" ? $("#btn-signin") : $("#btn-signout");
   const verb = direction === "in" ? "Sign-in" : "Sign-out";
   btn.disabled = true;
-  try {
-    // Pre-check the shift window (same settings the server enforces) — instant,
-    // unambiguous block instead of a 15 s GPS wait that ends in "Timed out".
-    const s = S.settings || {};
-    const ws = hhmmMin(s.shift_start), we = hhmmMin(s.shift_end);
-    if (ws != null && we != null) {
-      const nm = astMinutesNow();
-      if (nm < ws || nm > we) {
-        showAlert(verb + " blocked",
-          `Outside work hours.\nThe shift window is ${s.shift_start}–${s.shift_end} AST — it's now ${Math.floor(nm / 60)}:${String(nm % 60).padStart(2, "0")} AST. Try again inside the window.`);
-        return;
-      }
+  // Pre-check the shift window (same settings the server enforces) — instant,
+  // unambiguous block instead of a 15 s GPS wait that ends in "Timed out".
+  const s = S.settings || {};
+  const ws = hhmmMin(s.shift_start), we = hhmmMin(s.shift_end);
+  if (ws != null && we != null) {
+    const nm = astMinutesNow();
+    if (nm < ws || nm > we) {
+      btn.disabled = false;
+      showAlert(verb + " blocked",
+        `Outside work hours.\nThe shift window is ${s.shift_start}–${s.shift_end} AST — it's now ${Math.floor(nm / 60)}:${String(nm % 60).padStart(2, "0")} AST. Try again inside the window.`);
+      return;
     }
+  }
+  // Kick off the sign-in (GPS + server) in the BACKGROUND so the signature pad
+  // opens INSTANTLY instead of after the multi-second GPS wait. The pad's Save
+  // handler awaits this promise, so a signature only commits once the sign-in
+  // has actually succeeded (no orphan signature if the sign-in is rejected).
+  pendingSignin = (async () => {
     toast("Checking location…");
     const g = await getLocation();
-    const r = await api("/api/signin", { method: "POST", body: {
+    return await api("/api/signin", { method: "POST", body: {
       direction, latitude: g.lat, longitude: g.lon, accuracy: g.acc,
     } });
+  })();
+  _sigPadIsSignin = true;    // pad is about to be opened for THIS sign-in -> its Save should await pendingSignin
+  promptSignature(direction); // open the pad NOW — don't wait for GPS/POST
+  pendingSignin.then((r) => {
     toast(direction === "in" ? `Signed in ✓ ${r.site}` : `Signed out ✓ ${r.site}`);
-    S.me.signed_in = direction === "in"; setSignState(); // flip the buttons immediately
-    promptSignature(direction); // open the pad IMMEDIATELY (don't wait for the data refresh)
+    S.me.signed_in = direction === "in"; setSignState(); // flip the buttons
+    btn.disabled = false;
     refresh().catch(() => {});  // refresh data in the background
-  } catch (e) {
+  }).catch((e) => {
+    btn.disabled = false;
+    const modal = $("#sig-modal"); if (modal) modal.style.display = "none"; // pad is pointless if the sign-in failed
     showAlert(verb + " blocked", humanizeSignError(e));
-  } finally { btn.disabled = false; setSignState(); }
+  });
 }
 
 // ---------- daily register (admin) ----------
@@ -2736,8 +2747,14 @@ function renderRegisterScreen() {
 
 // ---------- signature modal (canvas) ----------
 let sigCtx = null, sigDirty = false, sigTarget = null, sigSaving = false;
+let pendingSignin = null;   // promise for the in-flight sign-in (set by doSign); save awaits it
+let _sigPadIsSignin = false;// true when doSign() opens the pad for a fresh sign-in (save should await pendingSignin)
 function openSigModal(emp, direction) {
   sigTarget = { emp: String(emp), direction };
+  // Only await the in-flight sign-in if THIS pad-open was triggered by doSign.
+  // (A later pad-open — e.g. admin tapping a sig cell — should save directly.)
+  const shouldAwaitSignin = _sigPadIsSignin === true;
+  _sigPadIsSignin = false;
   const modal = $("#sig-modal");
   modal.style.display = "flex";
   const c = $("#sig-canvas");
@@ -2813,6 +2830,16 @@ function openSigModal(emp, direction) {
   saveBtn.onclick = async () => {
     if (sigSaving) return;                 // one save at a time — no double-fire
     if (!sigDirty) return toast("Draw your signature first", "err");
+    // If a sign-in is still in flight (GPS/POST) and THIS pad was opened by doSign,
+    // wait for it to succeed before storing the signature.
+    if (shouldAwaitSignin && pendingSignin) {
+      try { await pendingSignin; }
+      catch (e) {
+        sigSaving = false; saveBtn.disabled = false; saveBtn.textContent = "Save signature";
+        const m2 = $("#sig-modal"); if (m2) m2.style.display = "none";
+        return toast("Sign-in didn't complete — not saving the signature", "err");
+      }
+    }
     sigSaving = true; saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     try {
       const data = c.toDataURL("image/png");
@@ -3048,6 +3075,25 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (S_reg) { await loadRegister(S_reg.date); renderRegister(); }
     } catch (e) { } finally { S.refreshing = false; }
   }, 5000);
+  // Teams/OS throttles or pauses timers while the tab is backgrounded or the phone
+  // screen is locked, so the 5s tick stops and data goes stale. Force an immediate
+  // refresh the instant the user comes BACK to the app (tab focus / screen visible).
+  const doAutoRefresh = async () => {
+    if (document.hidden) return;
+    const sigModalOpen = $("#sig-modal") && $("#sig-modal").style.display === "flex";
+    const editModalOpen = $("#editsig-modal") && $("#editsig-modal").style.display === "flex";
+    if (sigModalOpen || editModalOpen) return;
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest("#reg-table")) return;
+    if (S.refreshing) return;
+    S.refreshing = true;
+    try {
+      await refresh();
+      if (S_reg) { await loadRegister(S_reg.date); renderRegister(); }
+    } catch (e) { } finally { S.refreshing = false; }
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) doAutoRefresh(); });
+  window.addEventListener("focus", () => doAutoRefresh());
   // identity first (prod only), then data
   if (API_BASE) {
     // Guard the sign-in handshake: if the Teams SSO token never resolves (a known
