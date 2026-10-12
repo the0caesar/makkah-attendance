@@ -245,7 +245,7 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { height: 34px; max-width: 110px; display: block; }
+#reg-table .sig-img { height: 22px; max-width: 110px; display: block; }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
@@ -2504,6 +2504,8 @@ function renderRegister() {
     const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
     const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
     const rem = S_reg.remarks[e];
+    // الموقع = the site they signed in from that day (falls back to their default site)
+    const siteOf = (si && si.site) ? si.site : (so && so.site ? so.site : p.site);
     const noteHtml = isVac
       ? `<span class="reg-note">Vacation</span>`
       : (needsReview
@@ -2517,7 +2519,7 @@ function renderRegister() {
       <td><b>${esc(p.name)}</b></td>
       <td>${isVac ? "—" : REG_SECTION}</td>
       <td>${esc(e)}</td>
-      <td>${esc(p.site || "—")}</td>
+      <td>${esc(siteOf || "—")}</td>
       <td class="time">${si ? esc(fmtClock(si.at)) : ""}</td>
       <td class="reg-sigcell" data-emp="${e}" data-dir="in" title="Tap to add/edit sign-in signature">${sigIn ? `<img class="sig-img" src="${sigIn}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigIn ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="in" title="Remove this signature">✕</button>` : ""}</td>
       <td class="time">${so ? esc(fmtClock(so.at)) : ""}</td>
@@ -2674,6 +2676,7 @@ async function regPdf() {
         const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
         const rem = S_reg.remarks[e];
         const nm = arName(e) ? arName(e) : esc(p.name);
+        const siteOf = (si && si.site) ? si.site : (so && so.site ? so.site : p.site);
         const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
         const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
         return "<tr>" +
@@ -2681,7 +2684,7 @@ async function regPdf() {
           '<td class="arname">' + nm + "</td>" +
           "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
           '<td class="ltr">' + esc(e) + "</td>" +
-          "<td>" + esc(p.site || "\u2014") + "</td>" +
+          "<td>" + esc(siteOf || "\u2014") + "</td>" +
           '<td class="ltr ctr">' + (si ? esc(fmtClock(si.at)) : "") + "</td>" +
           '<td class="sigc">' + sig(sigIn) + "</td>" +
           '<td class="ltr ctr">' + (so ? esc(fmtClock(so.at)) : "") + "</td>" +
@@ -2699,8 +2702,10 @@ async function regPdf() {
         "#pdfpage table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}" +
         "#pdfpage th,#pdfpage td{border:1px solid #111;padding:4px 4px;text-align:center;vertical-align:middle;overflow:hidden;word-break:break-word}" +
         "#pdfpage thead th{font:bold 13px Arial;padding:6px 4px}" +
+        "#pdfpage tbody tr{height:30px}#pdfpage tbody td{height:30px}" +
         "#pdfpage td.arname{font:bold 13px 'Segoe UI',Tahoma,Arial;text-align:center}" +
-        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:34px}" +
+        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:30px}" +
+        "#pdfpage .sigimg{max-height:24px;max-width:96px;display:block;margin:0 auto}" +
         "#pdfpage td.note{font-size:11px;line-height:1.35}";
       const pageHtml = '<div id="pdfpage" dir="rtl">' +
         '<div class="pg">' +
