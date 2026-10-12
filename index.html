@@ -2593,7 +2593,7 @@ function renderRegister() {
   // – hide a person from this day's register/PDF (admin only)
   $$("#reg-table .reg-hide").forEach(b => b.addEventListener("click", async (ev) => {
     ev.stopPropagation();
-    if (!confirm("Hide this person from today's register & PDF?"))) return;
+    if (!confirm("Hide this person from today's register & PDF?")) return;
     try {
       await api("/api/register/hidden", { method: "POST", body: { date: S_reg.date, employee: b.dataset.emp, action: "remove" } });
       toast("Hidden from this day"); await loadRegister(S_reg.date); renderRegister();
