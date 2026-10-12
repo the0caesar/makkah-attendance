@@ -747,7 +747,10 @@ function pkceLogin() {
   // Non-SharePoint build: re-run the MSAL/Teams SSO identity.
   AUTH_ERR = null;
   toast("Retrying sign-in…");
-  ensureAuth().then(ok => {
+  Promise.race([
+    ensureAuth(),
+    new Promise(res => setTimeout(() => { AUTH_ERR = AUTH_ERR || "sign-in timed out — please retry"; res(null); }, 15000)),
+  ]).then(ok => {
     if (ok) {
       const el = $("#auth-screen"); if (el) el.style.display = "none";
       const m = document.querySelector("main"); if (m) m.style.display = "";
@@ -2837,7 +2840,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => { if (!document.hidden && (S.screen === "today" || S.screen === "approvals")) refresh().catch(() => { }); }, 60000);
   // identity first (prod only), then data
   if (API_BASE) {
-    const tok = await ensureAuth();
+    // Guard the sign-in handshake: if the Teams SSO token never resolves (a known
+    // stall), don't hang on the shell forever — fall through to the sign-in screen.
+    const tok = await Promise.race([
+      ensureAuth(),
+      new Promise(res => setTimeout(() => { AUTH_ERR = "sign-in timed out — please retry"; res(null); }, 15000)),
+    ]);
     if (!tok) { showAuthScreen("login"); return; }
   }
   try {
