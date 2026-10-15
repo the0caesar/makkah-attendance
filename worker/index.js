@@ -1030,7 +1030,7 @@ export default {
       const b64 = await env.REG_SIGS.get("pdf:" + name);
       if (!b64) return json({ error: "not found" }, 404, cors);
       return new Response(b64decode(b64), {
-        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${name}"`, "Cache-Control": "no-store", ...cors },
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store", ...cors },
       });
     }
     // POST /api/register/pdf?week=YYYY-MM-DD — admin uploads the generated PDF

@@ -1304,17 +1304,19 @@ async function api(path, opts = {}) {
 }
 
 // Open a URL EXTERNALLY (the phone's real browser, not the Teams webview) so it can
-// save/share PDFs the webview can't. Uses the Teams SDK's app.openLink; falls back
-// to window.open if the SDK isn't available.
-function openExternal(url) {
+// save/share PDFs the webview can't. Uses the Teams SDK's app.openLink (awaited, with
+// timeout); falls back to window.open. Resolves to true only if the open reported success.
+async function openExternal(url, timeoutMs = 2500) {
   try {
     if (window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.openLink) {
       const p = microsoftTeams.app.openLink({ url });
-      if (p && typeof p.then === "function") { p.then(() => true).catch(() => false); }
-      return true;
+      if (p && typeof p.then === "function") {
+        return await Promise.race([p.then(() => true).catch(() => false), new Promise(r => setTimeout(() => r(false), timeoutMs))]);
+      }
+      return true; // fire-and-forget variant — can't verify
     }
   } catch (_) {}
-  try { window.open(url, "_blank"); return true; } catch (_) { return false; }
+  try { const w = window.open(url, "_blank"); return !!w; } catch (_) { return false; }
 }
 // Show a tappable link in the page (in case openExternal couldn't auto-open).
 function showPdfLink(url, name) {
@@ -1326,8 +1328,8 @@ function showPdfLink(url, name) {
     document.body.appendChild(bar);
   }
   bar.style.display = "flex";
-  bar.innerHTML = `<span style="color:#cfe0ff;font-size:13px;flex:1 1 160px">📄 PDF ready — tap the link to open it in your browser (then save/share it):</span>
-    <a href="${url}" target="_blank" rel="noopener" style="color:#7db2ff;font-weight:700;font-size:13px;text-decoration:underline;word-break:break-all">Open ${name} ↗</a>
+  bar.innerHTML = `<span style="color:#cfe0ff;font-size:13px;flex:1 1 160px">📄 PDF ready — if it didn't open automatically, tap the link (or long-press to copy it and open in your browser, then save/share it):</span>
+    <a href="${url}" target="_blank" rel="noopener" style="color:#7db2ff;font-weight:700;font-size:13px;text-decoration:underline;word-break:break-all;flex:1 1 100%">${url}</a>
     <button id="pdf-link-close" style="background:#2a3c6b;color:#dfe8ff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer">Close</button>`;
   bar.querySelector("#pdf-link-close").onclick = () => { bar.style.display = "none"; };
 }
@@ -3078,9 +3080,11 @@ async function regPdf() {
           const uj = await up.json().catch(() => ({}));
           if (!up.ok || !uj.url) throw new Error(uj.error || "HTTP " + up.status);
           // Open the link EXTERNALLY so it lands in the phone's browser (can save/share).
-          const opened = openExternal(uj.url);
-          toast(opened ? "PDF opened — use ⋯ to save or share it" : "Tap the PDF link below to open it");
-          if (!opened) showPdfLink(uj.url, fname);
+          // Always show the link bar too — openLink can't be trusted on some phone
+          // Teams versions (it may open in Teams' own in-app browser), so give a tappable/copyable link.
+          const opened = await openExternal(uj.url);
+          showPdfLink(uj.url, fname);
+          toast(opened ? "Link opened. If it opened inside Teams, use the link at the bottom to open it in your browser." : "Use the link at the bottom to open the PDF in your browser.");
         } catch (e) {
           toast("Couldn't prepare the PDF link: " + (e.message || e), "err");
         }
@@ -3135,10 +3139,10 @@ document.addEventListener("DOMContentLoaded", async () => {
           </div>
           <button class="btn primary sm savedpdfs-open" data-url="${esc(e.url)}" data-name="${esc(e.name)}">⬇ Get</button>
         </div>`).join("");
-      $$("#savedpdfs-list .savedpdfs-open").forEach(b => b.addEventListener("click", () => {
-        const opened = openExternal(b.dataset.url);
-        toast(opened ? "PDF opened — use ⋯ to save or share it" : "Tap the link in the bar below to open it");
-        if (!opened) showPdfLink(b.dataset.url, b.dataset.name);
+      $$("#savedpdfs-list .savedpdfs-open").forEach(b => b.addEventListener("click", async () => {
+        const opened = await openExternal(b.dataset.url);
+        showPdfLink(b.dataset.url, b.dataset.name);
+        toast(opened ? "Link opened. If it opened inside Teams, use the link at the bottom to open it in your browser." : "Use the link at the bottom to open the PDF in your browser.");
       }));
     } catch (e) {
       listEl.innerHTML = `<div style="color:var(--red,#ff5a5a);padding:12px">Couldn't load: ${esc(e.message || e)}</div>`;
