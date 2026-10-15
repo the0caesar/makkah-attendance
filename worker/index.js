@@ -1048,7 +1048,25 @@ export default {
       const rand = Math.random().toString(36).slice(2, 10);
       const name = week + "-" + rand + ".pdf";
       await env.REG_SIGS.put("pdf:" + name, b64encode(buf));
+      // keep a small index so saved PDFs can be listed (KV has no list-by-prefix)
+      let list = [];
+      try { list = JSON.parse((await env.REG_SIGS.get("pdfindex")) || "[]"); } catch (_) {}
+      if (!Array.isArray(list)) list = [];
+      list.unshift({ name, week, at: new Date().toISOString(), bytes: buf.byteLength });
+      if (list.length > 500) list.length = 500;
+      await env.REG_SIGS.put("pdfindex", JSON.stringify(list));
       return json({ url: url.origin + "/pdf/" + name, name, bytes: buf.byteLength }, 200, cors);
+    }
+    // GET /api/register/pdfs — admin: list saved weekly PDFs (newest first).
+    if (url.pathname === "/api/register/pdfs" && req.method === "GET") {
+      const { ident: m } = await identityFor(req, env);
+      if (!m) return json({ error: "unauthorized" }, 401, cors);
+      const adminOnly = new Set(String(env.ADMIN_ONLY_NUMBERS || "").split(",").map(s => s.trim()).filter(Boolean));
+      if (!(m.is_approver || adminOnly.has(String(m.employee_number)))) return json({ error: "admin only" }, 403, cors);
+      let list = [];
+      try { list = JSON.parse((await env.REG_SIGS.get("pdfindex")) || "[]"); } catch (_) {}
+      if (!Array.isArray(list)) list = [];
+      return json(list.map(e => ({ ...e, url: url.origin + "/pdf/" + e.name })), 200, cors);
     }
     // /app/* — serves the web app from GitHub Pages with FRESHNESS headers, so the
     // Teams tab always gets the latest build WITHOUT a new app install. HTML: no-cache

@@ -426,6 +426,18 @@ table.grid.compact td.today-col { background: #19262e; }
     </div>
   </div>
 
+  <!-- Saved PDFs (admin) -->
+  <div id="savedpdfs-modal" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.55);align-items:center;justify-content:center">
+    <div class="sig-box" style="width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column">
+      <div class="sig-title" style="display:flex;align-items:center;gap:10px">
+        <span style="flex:1">📁 Saved PDFs</span>
+        <button class="btn ghost sm" id="savedpdfs-refresh" title="Reload list">↻</button>
+        <button class="btn ghost sm" id="savedpdfs-close" title="Close">✕</button>
+      </div>
+      <div id="savedpdfs-list" style="overflow:auto;max-height:60vh;margin-top:10px;font-size:14px"></div>
+    </div>
+  </div>
+
   <!-- ADMIN -->
   <section id="screen-admin" class="screen" style="display:none">
     <h2>Admin</h2>
@@ -445,6 +457,7 @@ table.grid.compact td.today-col { background: #19262e; }
         <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
         <button class="btn ghost" id="reg-add-sig">✍ Add signature</button>
         <button class="btn primary" id="reg-pdf">⬇ Download PDF (week)</button>
+        <button class="btn ghost" id="reg-pdfs">📁 Saved PDFs</button>
         <span class="hint" id="reg-status"></span>
       </div>
       <div class="reg-wrap">
@@ -3103,6 +3116,42 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#reg-refresh").addEventListener("click", () => { S_reg = null; renderRegisterScreen(); });
   $("#reg-add-sig").addEventListener("click", () => openRegSigPicker());
   $("#reg-pdf").addEventListener("click", () => regPdf());
+  // Saved PDFs list (admin) — shows every weekly PDF uploaded to the worker.
+  async function loadSavedPdfs() {
+    const listEl = $("#savedpdfs-list");
+    listEl.innerHTML = '<div style="color:var(--muted);padding:12px">Loading…</div>';
+    try {
+      const list = await api("/api/register/pdfs");
+      if (!Array.isArray(list) || !list.length) {
+        listEl.innerHTML = '<div style="color:var(--muted);padding:12px">No saved PDFs yet. Use “⬇ Download PDF (week)” — it also saves here for later.</div>';
+        return;
+      }
+      const fmtD = (iso) => { try { return new Date(iso).toLocaleString("en-GB", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (_) { return iso; } };
+      listEl.innerHTML = list.map(e => `
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <div style="flex:1;min-width:150px">
+            <div style="font-weight:700">Week of ${esc(e.week)}</div>
+            <div style="font-size:12px;color:var(--muted)">${esc(fmtD(e.at))} • ${e.bytes ? (e.bytes/1048576).toFixed(1)+" MB" : ""}</div>
+          </div>
+          <button class="btn primary sm savedpdfs-open" data-url="${esc(e.url)}" data-name="${esc(e.name)}">⬇ Get</button>
+        </div>`).join("");
+      $$("#savedpdfs-list .savedpdfs-open").forEach(b => b.addEventListener("click", () => {
+        const opened = openExternal(b.dataset.url);
+        toast(opened ? "PDF opened — use ⋯ to save or share it" : "Tap the link in the bar below to open it");
+        if (!opened) showPdfLink(b.dataset.url, b.dataset.name);
+      }));
+    } catch (e) {
+      listEl.innerHTML = `<div style="color:var(--red,#ff5a5a);padding:12px">Couldn't load: ${esc(e.message || e)}</div>`;
+    }
+  }
+  $("#reg-pdfs").addEventListener("click", () => {
+    const m = $("#savedpdfs-modal");
+    m.style.display = "flex";
+    loadSavedPdfs();
+  });
+  $("#savedpdfs-close").addEventListener("click", () => { $("#savedpdfs-modal").style.display = "none"; });
+  $("#savedpdfs-refresh").addEventListener("click", loadSavedPdfs);
+  $("#savedpdfs-modal").addEventListener("click", (ev) => { if (ev.target.id === "savedpdfs-modal") $("#savedpdfs-modal").style.display = "none"; });
   $("#wk-prev").addEventListener("click", async () => {
     const x = new Date(S.weekStart);
     if (S.gridView === "year") x.setFullYear(x.getFullYear() - 1);
