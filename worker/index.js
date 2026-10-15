@@ -1000,12 +1000,56 @@ async function scheduled(event, env) {
   }));
 }
 
+// b64 <-> bytes (KV stores strings; PDFs go in as base64)
+function b64encode(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function b64decode(s) {
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const cors = corsHeaders(env, req);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (url.pathname === "/health") return json({ ok: true, at: nowZ() }, 200, cors);
+    // GET /pdf/<name> — serves a previously uploaded register PDF (public; name
+    // includes a random token so it's not guessable). Phones open this EXTERNALLY
+    // in their own browser, which CAN save/share PDFs (the Teams webview can't).
+    if (url.pathname.startsWith("/pdf/") && req.method === "GET") {
+      const name = url.pathname.slice(5);
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+\.pdf$/.test(name)) return json({ error: "bad name" }, 400, cors);
+      if (!env.REG_SIGS) return json({ error: "kv unbound" }, 500, cors);
+      const b64 = await env.REG_SIGS.get("pdf:" + name);
+      if (!b64) return json({ error: "not found" }, 404, cors);
+      return new Response(b64decode(b64), {
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${name}"`, "Cache-Control": "no-store", ...cors },
+      });
+    }
+    // POST /api/register/pdf?week=YYYY-MM-DD — admin uploads the generated PDF
+    // (binary body), gets back a public URL to open it on the phone.
+    if (url.pathname === "/api/register/pdf" && req.method === "POST") {
+      const { ident: m } = await identityFor(req, env);
+      if (!m) return json({ error: "unauthorized" }, 401, cors);
+      const adminOnly = new Set(String(env.ADMIN_ONLY_NUMBERS || "").split(",").map(s => s.trim()).filter(Boolean));
+      if (!(m.is_approver || adminOnly.has(String(m.employee_number)))) return json({ error: "admin only" }, 403, cors);
+      const week = (url.searchParams.get("week") || "").replace(/[^0-9-]/g, "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return json({ error: "bad week" }, 400, cors);
+      const buf = await req.arrayBuffer();
+      if (!buf.byteLength) return json({ error: "empty body" }, 400, cors);
+      if (buf.byteLength > 15 * 1024 * 1024) return json({ error: "too large (max 15MB)" }, 413, cors);
+      const rand = Math.random().toString(36).slice(2, 10);
+      const name = week + "-" + rand + ".pdf";
+      await env.REG_SIGS.put("pdf:" + name, b64encode(buf));
+      return json({ url: url.origin + "/pdf/" + name, name, bytes: buf.byteLength }, 200, cors);
+    }
     // /app/* — serves the web app from GitHub Pages with FRESHNESS headers, so the
     // Teams tab always gets the latest build WITHOUT a new app install. HTML: no-cache
     // (always revalidate); assets: short cache (the index.html cache-bust ?v= on

@@ -1290,6 +1290,35 @@ async function api(path, opts = {}) {
   return j;
 }
 
+// Open a URL EXTERNALLY (the phone's real browser, not the Teams webview) so it can
+// save/share PDFs the webview can't. Uses the Teams SDK's app.openLink; falls back
+// to window.open if the SDK isn't available.
+function openExternal(url) {
+  try {
+    if (window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.openLink) {
+      const p = microsoftTeams.app.openLink({ url });
+      if (p && typeof p.then === "function") { p.then(() => true).catch(() => false); }
+      return true;
+    }
+  } catch (_) {}
+  try { window.open(url, "_blank"); return true; } catch (_) { return false; }
+}
+// Show a tappable link in the page (in case openExternal couldn't auto-open).
+function showPdfLink(url, name) {
+  let bar = document.getElementById("pdf-link-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "pdf-link-bar";
+    bar.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;z-index:9999;background:rgba(20,30,55,.97);border:1px solid rgba(120,160,255,.4);border-radius:12px;padding:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 6px 24px rgba(0,0,0,.5)";
+    document.body.appendChild(bar);
+  }
+  bar.style.display = "flex";
+  bar.innerHTML = `<span style="color:#cfe0ff;font-size:13px;flex:1 1 160px">📄 PDF ready — tap the link to open it in your browser (then save/share it):</span>
+    <a href="${url}" target="_blank" rel="noopener" style="color:#7db2ff;font-weight:700;font-size:13px;text-decoration:underline;word-break:break-all">Open ${name} ↗</a>
+    <button id="pdf-link-close" style="background:#2a3c6b;color:#dfe8ff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer">Close</button>`;
+  bar.querySelector("#pdf-link-close").onclick = () => { bar.style.display = "none"; };
+}
+
 // ====== kept helpers (identical to app.js) ======
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -3016,33 +3045,35 @@ async function regPdf() {
         doc.addImage(slUrl, "PNG", margin, margin, iw, slHpt);
         y += sliceH;
       }
-      // Deliver the PDF. Phones (Teams webview) ignore silent anchor-downloads, so on
-      // mobile use the system share sheet (Save to Files / Email / …); desktop downloads normally.
+      // Deliver the PDF. Phones (Teams webview) block silent file downloads, so on
+      // mobile we upload the PDF to the worker (KV) and open the returned URL EXTERNALLY
+      // (Teams SDK opens it in the phone's real browser, which can save/share PDFs).
+      // Desktop keeps the normal silent download.
       const fname = "attendance-register-" + ws + ".pdf";
       const blob = doc.output("blob");
-      let shared = false;
-      try {
-        const f = new File([blob], fname, { type: "application/pdf" });
-        if (navigator.canShare && navigator.canShare({ files: [f] })) {
-          await navigator.share({ files: [f], title: fname });
-          shared = true;
-          toast("Pick “Save to Files” / email it from the share sheet");
+      const isMobile = matchMedia("(pointer:coarse)").matches || /Mobi|iPhone|iPad|Android|Windows Phone/i.test(navigator.userAgent);
+      if (isMobile) {
+        try {
+          toast("Uploading PDF…");
+          const up = await fetch(API_BASE + "/api/register/pdf?week=" + ws, {
+            method: "POST",
+            headers: { "Content-Type": "application/pdf", ...(ID_TOKEN ? { "Authorization": "Bearer " + ID_TOKEN } : {}) },
+            body: blob,
+          });
+          const uj = await up.json().catch(() => ({}));
+          if (!up.ok || !uj.url) throw new Error(uj.error || "HTTP " + up.status);
+          // Open the link EXTERNALLY so it lands in the phone's browser (can save/share).
+          const opened = openExternal(uj.url);
+          toast(opened ? "PDF opened — use ⋯ to save or share it" : "Tap the PDF link below to open it");
+          if (!opened) showPdfLink(uj.url, fname);
+        } catch (e) {
+          toast("Couldn't prepare the PDF link: " + (e.message || e), "err");
         }
-      } catch (e) {
-        if (e && e.name === "AbortError") { shared = true; } // user closed the sheet — nothing more to do
+        return;
       }
-      if (!shared) {
-        // No usable share sheet (desktop, or mobile without file-share): normal download.
-        // On phones that still won't save, also open the PDF in a new tab so it can be saved from there.
-        doc.save(fname);
-        const isMobile = matchMedia("(pointer:coarse)").matches || /Mobi|iPhone|iPad|Android/i.test(navigator.userAgent);
-        if (isMobile) {
-          try { window.open(URL.createObjectURL(blob), "_blank"); } catch (_) {}
-          toast("Opened in a new tab — tap ⋯ and save it");
-        } else {
-          toast("PDF downloaded (week)");
-        }
-      }
+      // Desktop: normal download.
+      doc.save(fname);
+      toast("PDF downloaded (week)");
     } catch (e) {
       console.error("regPdf failed", e);
       if (node) { try { node.remove(); } catch (_) {} }
