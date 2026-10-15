@@ -203,10 +203,11 @@ a:hover { text-decoration: underline; }
 table.grid.compact thead th { font-size: 10px; }
 table.grid.compact td { padding: 2px 3px; min-width: 34px; max-width: 48px; }
 table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
-table.grid.day { min-width: 0; table-layout: fixed; }
+table.grid.day, table.grid.grid.day { min-width: 0; table-layout: fixed; }
 table.grid.day td { min-width: 0; max-width: none; padding: 6px 8px; white-space: normal; }
 table.grid.day thead th { white-space: normal; }
-table.grid.day td.person { width: 40%; }
+table.grid.day td.person { min-width: 0; width: 40%; }
+table.grid.day td[data-emp] { width: 60%; }
 table.grid th.wknd, table.grid td.wknd { background: rgba(255, 255, 255, 0.03); }
 table.grid.compact td.today-col { background: #19262e; }
 
