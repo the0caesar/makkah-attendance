@@ -203,7 +203,7 @@ a:hover { text-decoration: underline; }
 table.grid.compact thead th { font-size: 10px; }
 table.grid.compact td { padding: 2px 3px; min-width: 34px; max-width: 48px; }
 table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
-table.grid.day, table.grid.grid.day { min-width: 0; table-layout: fixed; }
+table.grid.day, table.grid.grid.day { min-width: 0; max-width: 540px; margin: 0 auto; table-layout: fixed; }
 table.grid.day td { min-width: 0; max-width: none; padding: 6px 8px; white-space: normal; }
 table.grid.day thead th { white-space: normal; }
 table.grid.day td.person { min-width: 0; width: 40%; }
@@ -256,18 +256,18 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table th.reg-subh { font-size: 10px; }
 #reg-table td { padding: 6px; border: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
 #reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; width: 62px; min-width: 62px; }
-#reg-table td.reg-sigcell { width: 62px; min-width: 62px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+#reg-table td.reg-sigcell { width: 62px; min-width: 62px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 2px; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { max-width: 100%; height: auto; max-height: 34px; display: block; background: #fff; padding: 1px 2px; border-radius: 3px; object-fit: contain; }
+#reg-table .sig-img { width: 100%; height: 100%; box-sizing: border-box; background: #fff; border-radius: 3px; object-fit: contain; display: block; }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
 .reg-remark { width: 100%; box-sizing: border-box; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; font: inherit; font-size: 12px; margin-top: 4px; }
 .reg-remark-by { font-size: 10px; color: var(--muted); margin-top: 3px; }
 #reg-table .reg-sigcell { position: relative; }
-#reg-table .reg-sigclear { margin-left: 6px; padding: 1px 6px; font-size: 10px; line-height: 1; vertical-align: middle; }
+#reg-table .reg-sigclear { position: absolute; top: 1px; left: 1px; margin: 0; padding: 0 3px; font-size: 9px; line-height: 1; background: rgba(0,0,0,.55); color: #fff; border-radius: 4px; z-index: 2; }
 #reg-table .reg-numcell { white-space: nowrap; width: 64px; }
 #reg-table .reg-name { white-space: nowrap; min-width: 120px; }
 #reg-table td.ltr { white-space: nowrap; width: 60px; min-width: 60px; }
@@ -1797,7 +1797,12 @@ function dayCols(ws) {
 }
 function weekCols(ws) {
   const td = todayISO();
-  return weekDays(ws).map((d, i) => ({ date: d, label: `${DAYN[i]}<br>${d.slice(5)}`, today: d === td }));
+  // Label each column by its ACTUAL weekday (not by position), so the header is
+  // correct even when the anchor isn't the week's Sunday.
+  return weekDays(ws).map(d => {
+    const wd = new Date(d + "T12:00:00").getDay();
+    return { date: d, label: `${DAYN[wd]}<br>${d.slice(5)}`, today: d === td };
+  });
 }
 function monthCols(ws) {
   const y = ws.getFullYear(), m = ws.getMonth();
@@ -3239,6 +3244,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (S.gridView === b.dataset.view) return;
     S.gridView = b.dataset.view;
     if (S.gridView === "day") S.weekStart = new Date(); // land on today
+    if (S.gridView === "week") S.weekStart = startOfWeek(S.weekStart); // week view always starts on Sunday
     await refresh();
   }));
   $("#gt-search").addEventListener("input", () => { S.gt.search = $("#gt-search").value; renderToday(); });
