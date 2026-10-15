@@ -2580,11 +2580,11 @@ function renderRegister() {
       const dt = new Date(new Date(dd + "T00:00:00Z").getTime() + 3 * 3600000);
       const wd = dt.toLocaleDateString("ar-EG", { weekday: "short", timeZone: "UTC" });
       const dnum = String(dt.getUTCDate()).padStart(2, "0");
-      return `<th colspan="2" class="reg-dayhead" dir="rtl"><span class="wd">${wd}</span><span class="dn" dir="ltr">${dnum}</span></th>`;
+      return `<th colspan="4" class="reg-dayhead" dir="rtl"><span class="wd">${wd}</span><span class="dn" dir="ltr">${dnum}</span></th>`;
     }).join("");
   thead2.innerHTML =
     `<th class="reg-h-sticky"></th><th class="reg-h-sticky"></th><th class="reg-h-sticky"></th>` +
-    days.map(() => `<th class="reg-subh">وقت الحضور</th><th class="reg-subh">التوقيع</th>`).join("");
+    days.map(() => `<th class="reg-subh">وقت الحضور</th><th class="reg-subh">توقيع الحضور</th><th class="reg-subh">وقت الانصراف</th><th class="reg-subh">توقيع الانصراف</th>`).join("");
   // ---- body ----
   tbody.innerHTML = rows.map((p, i) => {
     const e = String(p.employee);
@@ -2600,7 +2600,7 @@ function renderRegister() {
       const sigOut = (m.sigs[e] && m.sigs[e].out && m.sigs[e].out.data) || null;
       const timeCell = (dir, rec) => {
         if (isVac) return `<td class="reg-timecell vac">—</td>`;
-        return `<td class="reg-timecell time">${rec ? esc(fmtClock(rec.at)) : ""}${S.me.is_approver && rec ? `<button class="btn ghost sm reg-edit" data-date="${dd}" data-id="${esc(rec.id)}" data-dir="${dir}" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>`;
+        return `<td class="reg-timecell time">${rec ? esc(fmtClock(rec.at)) : ""}${S.me.is_approver && rec ? `<button class="btn ghost sm reg-edit" data-date="${dd}" data-emp="${e}" data-id="${esc(rec.id)}" data-dir="${dir}" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>`;
       };
       const sigCell = (dir, data) => {
         if (isVac) return `<td class="reg-sigcell vac">—</td>`;
@@ -2643,7 +2643,8 @@ function renderRegister() {
   // ✎ edit time/site or delete a sign-in (admin only)
   $$("#reg-table .reg-edit").forEach(b => b.addEventListener("click", () => {
     const date = b.dataset.date;
-    const rec = ((S_regMap[date] && S_regMap[date][b.dataset.dir === "in" ? "si" : "so"]) || {})[b.dataset.id];
+    const emp = b.dataset.emp;
+    const rec = ((S_regMap[date] && S_regMap[date][b.dataset.dir === "in" ? "si" : "so"]) || {})[emp];
     if (!rec) return toast("Sign-in not found", "err");
     const dir = b.dataset.dir;
     const m = $("#editsig-modal");
