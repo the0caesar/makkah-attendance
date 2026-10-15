@@ -262,8 +262,8 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { max-width: 100%; height: auto; max-height: 20px; display: block; background: transparent; object-fit: contain; }
-#reg-table td.reg-sigcell.has-sig { background: #fff; padding: 3px 4px; }
+#reg-table .sig-img { width: 100%; height: 100%; display: block; background: transparent; object-fit: contain; }
+#reg-table td.reg-sigcell.has-sig { background: #fff; padding: 3px 4px; border-color: rgba(255,255,255,.07); }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
@@ -271,9 +271,20 @@ table.grid.compact td.today-col { background: #19262e; }
 .reg-remark-by { font-size: 10px; color: var(--muted); margin-top: 3px; }
 #reg-table .reg-sigcell { position: relative; }
 #reg-table .reg-sigclear { position: absolute; top: 1px; left: 1px; margin: 0; padding: 0 3px; font-size: 9px; line-height: 1; background: rgba(0,0,0,.55); color: #fff; border-radius: 4px; z-index: 2; }
-#reg-table .reg-numcell { white-space: nowrap; width: 64px; }
+#reg-table td.reg-numcell { white-space: nowrap; width: 64px; }
 #reg-table .reg-name { white-space: nowrap; min-width: 120px; }
 #reg-table td.ltr { white-space: nowrap; width: 60px; min-width: 60px; }
+/* freeze the identifier columns (# / Name / Emp #) while scrolling horizontally */
+#reg-table td.reg-numcell, #reg-table td.reg-name, #reg-table td.ltr { position: sticky; background: var(--bg); z-index: 1; }
+#reg-table td.reg-numcell { left: 0; }
+#reg-table td.reg-name { left: 64px; }
+#reg-table td.ltr { left: 234px; }
+#reg-table thead tr:first-child th:nth-child(1) { left: 0; }
+#reg-table thead tr:first-child th:nth-child(2) { left: 64px; }
+#reg-table thead tr:first-child th:nth-child(3) { left: 234px; }
+#reg-table thead tr:nth-child(2) th:nth-child(1) { left: 0; }
+#reg-table thead tr:nth-child(2) th:nth-child(2) { left: 64px; }
+#reg-table thead tr:nth-child(2) th:nth-child(3) { left: 234px; }
 #reg-table .reg-num { display: inline-block; min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
 #reg-table .reg-timecell { white-space: nowrap; }
 #reg-table .reg-edit { margin-left: 5px; padding: 1px 6px; font-size: 11px; line-height: 1; vertical-align: middle; }
