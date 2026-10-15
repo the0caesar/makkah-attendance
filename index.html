@@ -3016,8 +3016,33 @@ async function regPdf() {
         doc.addImage(slUrl, "PNG", margin, margin, iw, slHpt);
         y += sliceH;
       }
-      doc.save("attendance-register-" + ws + ".pdf");
-      toast("PDF downloaded (week)");
+      // Deliver the PDF. Phones (Teams webview) ignore silent anchor-downloads, so on
+      // mobile use the system share sheet (Save to Files / Email / …); desktop downloads normally.
+      const fname = "attendance-register-" + ws + ".pdf";
+      const blob = doc.output("blob");
+      let shared = false;
+      try {
+        const f = new File([blob], fname, { type: "application/pdf" });
+        if (navigator.canShare && navigator.canShare({ files: [f] })) {
+          await navigator.share({ files: [f], title: fname });
+          shared = true;
+          toast("Pick “Save to Files” / email it from the share sheet");
+        }
+      } catch (e) {
+        if (e && e.name === "AbortError") { shared = true; } // user closed the sheet — nothing more to do
+      }
+      if (!shared) {
+        // No usable share sheet (desktop, or mobile without file-share): normal download.
+        // On phones that still won't save, also open the PDF in a new tab so it can be saved from there.
+        doc.save(fname);
+        const isMobile = matchMedia("(pointer:coarse)").matches || /Mobi|iPhone|iPad|Android/i.test(navigator.userAgent);
+        if (isMobile) {
+          try { window.open(URL.createObjectURL(blob), "_blank"); } catch (_) {}
+          toast("Opened in a new tab — tap ⋯ and save it");
+        } else {
+          toast("PDF downloaded (week)");
+        }
+      }
     } catch (e) {
       console.error("regPdf failed", e);
       if (node) { try { node.remove(); } catch (_) {} }
