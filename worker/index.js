@@ -1044,7 +1044,7 @@ export default {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return json({ error: "bad week" }, 400, cors);
       const buf = await req.arrayBuffer();
       if (!buf.byteLength) return json({ error: "empty body" }, 400, cors);
-      if (buf.byteLength > 15 * 1024 * 1024) return json({ error: "too large (max 15MB)" }, 413, cors);
+      if (buf.byteLength > 24 * 1024 * 1024) return json({ error: "too large (max 24MB)" }, 413, cors);
       const rand = Math.random().toString(36).slice(2, 10);
       const name = week + "-" + rand + ".pdf";
       await env.REG_SIGS.put("pdf:" + name, b64encode(buf));

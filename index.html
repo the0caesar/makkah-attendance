@@ -3022,11 +3022,11 @@ async function regPdf() {
         Promise.all(imgs.map(im => im.complete ? Promise.resolve() : new Promise(res => { im.onload = res; im.onerror = res; }))),
         new Promise(r => setTimeout(r, 4000))
       ]);
-      const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
-      const dataUrl = canvas.toDataURL("image/png");
+      const canvas = await window.html2canvas(node, { scale: 1.5, backgroundColor: "#ffffff", useCORS: true, logging: false });
       const cW = canvas.width, cH = canvas.height;
       node = null; host.remove();
       // A4 portrait, fit width, slice vertically across pages if taller than a page.
+      // JPEG (not PNG) keeps the file small — white bg, so no transparency needed.
       const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
       const PW = 595.28, PH = 841.89, margin = 14;
       const iw = PW - margin * 2;
@@ -3038,11 +3038,13 @@ async function regPdf() {
         const sliceH = Math.min(cH - y, pageHpx);
         const sl = document.createElement("canvas");
         sl.width = cW; sl.height = sliceH;
-        sl.getContext("2d").drawImage(canvas, 0, y, cW, sliceH, 0, 0, cW, sliceH);
-        const slUrl = sl.toDataURL("image/png");
+        const sctx = sl.getContext("2d");
+        sctx.fillStyle = "#ffffff"; sctx.fillRect(0, 0, cW, sliceH); // white base (JPEG has no alpha)
+        sctx.drawImage(canvas, 0, y, cW, sliceH, 0, 0, cW, sliceH);
+        const slUrl = sl.toDataURL("image/jpeg", 0.85);
         if (y > 0) doc.addPage();
         const slHpt = sliceH / cW * iw;
-        doc.addImage(slUrl, "PNG", margin, margin, iw, slHpt);
+        doc.addImage(slUrl, "JPEG", margin, margin, iw, slHpt);
         y += sliceH;
       }
       // Deliver the PDF. Phones (Teams webview) block silent file downloads, so on
