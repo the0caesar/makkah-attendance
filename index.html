@@ -203,6 +203,10 @@ a:hover { text-decoration: underline; }
 table.grid.compact thead th { font-size: 10px; }
 table.grid.compact td { padding: 2px 3px; min-width: 34px; max-width: 48px; }
 table.grid.compact td.person { min-width: 165px; padding: 6px 8px; }
+table.grid.day { min-width: 0; table-layout: fixed; }
+table.grid.day td { min-width: 0; max-width: none; padding: 6px 8px; white-space: normal; }
+table.grid.day thead th { white-space: normal; }
+table.grid.day td.person { width: 40%; }
 table.grid th.wknd, table.grid td.wknd { background: rgba(255, 255, 255, 0.03); }
 table.grid.compact td.today-col { background: #19262e; }
 
@@ -250,8 +254,8 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table th.reg-dayhead .dn { display: block; font-size: 11px; color: var(--accent, #4cc2ff); font-variant-numeric: tabular-nums; }
 #reg-table th.reg-subh { font-size: 10px; }
 #reg-table td { padding: 6px; border: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
-#reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 52px; }
-#reg-table td.reg-sigcell { min-width: 52px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+#reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; width: 62px; min-width: 62px; }
+#reg-table td.reg-sigcell { width: 62px; min-width: 62px; display: flex; align-items: center; justify-content: center; gap: 2px; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
@@ -264,6 +268,8 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table .reg-sigcell { position: relative; }
 #reg-table .reg-sigclear { margin-left: 6px; padding: 1px 6px; font-size: 10px; line-height: 1; vertical-align: middle; }
 #reg-table .reg-numcell { white-space: nowrap; width: 64px; }
+#reg-table .reg-name { white-space: nowrap; min-width: 120px; }
+#reg-table td.ltr { white-space: nowrap; width: 60px; min-width: 60px; }
 #reg-table .reg-num { display: inline-block; min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
 #reg-table .reg-timecell { white-space: nowrap; }
 #reg-table .reg-edit { margin-left: 5px; padding: 1px 6px; font-size: 11px; line-height: 1; vertical-align: middle; }
@@ -1618,9 +1624,9 @@ function startEditFromMap(site) {
 // ---------- state ----------
 const S = {
   me: null, roster: [], settings: {}, sites: [],
-  weekStart: startOfWeek(new Date()),
+  weekStart: new Date(),
   shiftWeekStart: startOfWeek(new Date()),
-  gridView: "week",
+  gridView: "day",
   gt: { search: "", sort: "name-asc", date: todayISO(), status: "all" },
   oncall: [], requests: [], signins: [], training: [],
   screen: "today", adminTab: "register",
@@ -1742,7 +1748,7 @@ function renderToday() {
   $$("#viewtoggle button").forEach(b => b.classList.toggle("active", b.dataset.view === S.gridView));
   // grid
   const td = todayISO();
-  const compact = S.gridView !== "week";
+  const compact = S.gridView === "month";
   const cols = S.gridView === "year" ? yearCols(ws) : S.gridView === "day" ? dayCols(ws) : S.gridView === "month" ? monthCols(ws) : weekCols(ws);
   let html = "<thead><tr><th>Person</th>";
   cols.forEach(c => {
@@ -1772,6 +1778,7 @@ function renderToday() {
   html += "</tbody>";
   const g = $("#grid");
   g.classList.toggle("compact", compact);
+  g.classList.toggle("day", S.gridView === "day");
   g.innerHTML = html;
   $$("#grid td[data-emp]").forEach(tdEl => tdEl.addEventListener("click", () => openDetail(tdEl.dataset.emp, tdEl.dataset.date)));
   $$("#grid td[data-ym]").forEach(tdEl => tdEl.addEventListener("click", () => {
@@ -2662,7 +2669,7 @@ function renderRegister() {
     const visBox = S.me.is_approver
       ? `<label class="reg-vislab" title="Checked = shown, unchecked = hidden (permanent, all days)"><input type="checkbox" class="reg-vis" data-emp="${e}" ${!hiddenSet.has(e) ? "checked" : ""}></label>`
       : "";
-    let cells = `<td class="reg-numcell">${visBox}<span class="reg-num">${i + 1}</span></td><td><b>${esc(arName(e) || p.name)}</b></td><td class="ltr">${esc(e)}</td>`;
+    let cells = `<td class="reg-numcell">${visBox}<span class="reg-num">${i + 1}</span></td><td class="reg-name"><b>${esc(arName(e) || p.name)}</b></td><td class="ltr">${esc(e)}</td>`;
     for (const dd of days) {
       const m = S_regMap[dd]; if (!m) continue;
       const si = m.si[e], so = m.so[e];
