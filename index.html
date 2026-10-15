@@ -86,8 +86,10 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .si-status.out { color: var(--muted); }
 .si-detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .si-buttons { display: flex; gap: 8px; }
-.weeknav { display: flex; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
-.weeknav span { font-weight: 600; font-size: 13px; min-width: 150px; text-align: center; }
+.weeknav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.weeknav .wn-block { display: flex; gap: 6px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+.weeknav span { font-weight: 600; font-size: 13px; min-width: 130px; text-align: center; }
+@media (max-width: 760px) { .weeknav span { min-width: 96px; } .weeknav .date-nav { flex: 1 1 100%; justify-content: center; } }
 
 /* grid */
 .grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
@@ -246,7 +248,7 @@ table.grid.compact td.today-col { background: #19262e; }
 .reg-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 14px; }
 .reg-bar input[type="date"] { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; }
 .reg-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
-#reg-table { border-collapse: collapse; width: 100%; min-width: 1100px; font-size: 12.5px; }
+#reg-table { border-collapse: collapse; width: 100%; min-width: 1100px; font-size: 12.5px; table-layout: fixed; }
 #reg-table thead th { position: sticky; top: 0; background: #10203c; color: var(--muted); font-size: 11px; letter-spacing: .3px; padding: 6px 6px; border: 1px solid var(--border); text-align: center; white-space: nowrap; z-index: 2; }
 #reg-table thead tr:nth-child(2) th { top: 30px; font-size: 10px; }
 #reg-table th.reg-h-sticky { position: sticky; left: 0; background: #10203c; z-index: 3; }
@@ -326,18 +328,22 @@ table.grid.compact td.today-col { background: #19262e; }
         </div>
       </div>
       <div class="weeknav">
-        <div class="viewtoggle" id="viewtoggle">
+        <div class="wn-block viewtoggle-wrap">
+          <div class="viewtoggle" id="viewtoggle">
           <button data-view="day">Day</button>
-          <button data-view="week" class="active">Week</button>
-          <button data-view="month">Month</button>
-          <button data-view="year">Year</button>
-        </div>
-        <button id="wk-prev" class="btn">‹</button>
-        <span id="wk-label">—</span>
-        <button id="wk-next" class="btn">›</button>
-        <button id="wk-today" class="btn ghost">Today</button>
-        <button id="wk-refresh" class="btn ghost" title="Refresh">⟳</button>
-      </div>
+            <button data-view="week" class="active">Week</button>
+            <button data-view="month">Month</button>
+            <button data-view="year">Year</button>
+          </div>
+          </div>
+          <div class="wn-block date-nav">
+          <button id="wk-prev" class="btn">‹</button>
+          <span id="wk-label">—</span>
+          <button id="wk-next" class="btn">›</button>
+          <button id="wk-today" class="btn ghost">Today</button>
+          <button id="wk-refresh" class="btn ghost" title="Refresh">⟳</button>
+          </div>
+          </div>
     </div>
     <div class="grid-toolbar">
       <input id="gt-search" type="search" placeholder="Filter people by name or number…" aria-label="Filter people">
@@ -2658,6 +2664,13 @@ function renderRegister() {
   const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee)))
     .sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
   const arName = (e) => AR_NAMES[String(e)] || "";
+  // ---- colgroup: fixed layout so header + body share EXACT column widths (no auto-stretch gaps) ----
+  const regTable = $("#reg-table");
+  regTable.querySelectorAll("colgroup").forEach(c => c.remove());
+  let colHtml = `<colgroup><col style="width:64px"><col style="width:170px"><col style="width:64px">`;
+  for (const _ of days) colHtml += `<col style="width:62px"><col style="width:62px"><col style="width:62px"><col style="width:62px">`;
+  colHtml += `</colgroup>`;
+  regTable.insertAdjacentHTML("afterbegin", colHtml);
   // ---- two-row header ----
   thead1.innerHTML =
     `<th class="reg-h-sticky">#</th><th class="reg-h-sticky">Name</th><th class="reg-h-sticky">Emp #</th>` +
