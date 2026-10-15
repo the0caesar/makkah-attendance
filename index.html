@@ -250,11 +250,11 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table th.reg-subh { font-size: 10px; }
 #reg-table td { padding: 6px; border: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
 #reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 52px; }
-#reg-table td.reg-sigcell { min-width: 58px; }
+#reg-table td.reg-sigcell { min-width: 84px; display: flex; align-items: center; gap: 2px; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { height: 24px; width: auto; display: block; background: #fff; padding: 2px 4px; border-radius: 4px; }
+#reg-table .sig-img { max-width: 100%; height: auto; max-height: 34px; display: block; background: #fff; padding: 1px 2px; border-radius: 3px; object-fit: contain; }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
