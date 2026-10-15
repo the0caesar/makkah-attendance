@@ -115,6 +115,7 @@ table.grid tr.me td { outline: 1px solid var(--accent); outline-offset: -1px; }
 .b-other { background: #8a8a8a; }
 .badge.outline { background: transparent; opacity: .85; }
 .b-in { background: transparent; border-color: var(--green); color: var(--green); }
+.b-out { background: transparent; border-color: var(--accent, #4cc2ff); color: var(--accent, #4cc2ff); }
 .b-in-out-loc { border-color: var(--red); color: var(--red); }
 .b-notin { border-color: var(--border); color: var(--muted); }
 
@@ -250,7 +251,7 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table th.reg-subh { font-size: 10px; }
 #reg-table td { padding: 6px; border: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
 #reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 52px; }
-#reg-table td.reg-sigcell { min-width: 84px; display: flex; align-items: center; gap: 2px; }
+#reg-table td.reg-sigcell { min-width: 52px; display: flex; align-items: center; justify-content: center; gap: 2px; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
@@ -318,6 +319,7 @@ table.grid.compact td.today-col { background: #19262e; }
       </div>
       <div class="weeknav">
         <div class="viewtoggle" id="viewtoggle">
+          <button data-view="day">Day</button>
           <button data-view="week" class="active">Week</button>
           <button data-view="month">Month</button>
           <button data-view="year">Year</button>
@@ -1730,6 +1732,7 @@ function renderToday() {
   // view label
   const ws = S.weekStart;
   if (S.gridView === "year") $("#wk-label").textContent = String(ws.getFullYear());
+  else if (S.gridView === "day") $("#wk-label").textContent = ws.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "long", year: "numeric" });
   else if (S.gridView === "month") $("#wk-label").textContent = ws.toLocaleDateString("en-GB", { timeZone: TZ, month: "long", year: "numeric" });
   else {
     const a = ws, b = addDays(ws, 6);
@@ -1740,7 +1743,7 @@ function renderToday() {
   // grid
   const td = todayISO();
   const compact = S.gridView !== "week";
-  const cols = S.gridView === "year" ? yearCols(ws) : S.gridView === "month" ? monthCols(ws) : weekCols(ws);
+  const cols = S.gridView === "year" ? yearCols(ws) : S.gridView === "day" ? dayCols(ws) : S.gridView === "month" ? monthCols(ws) : weekCols(ws);
   let html = "<thead><tr><th>Person</th>";
   cols.forEach(c => {
     const cls = [c.today ? "today-col" : "", c.wknd ? "wknd" : ""].filter(Boolean).join(" ");
@@ -1755,6 +1758,9 @@ function renderToday() {
       if (S.gridView === "year") {
         const cell = cellYear(p.employee, ws.getFullYear(), c.m);
         html += `<td class="compact ${c.today ? "today-col" : ""}" data-ym="${c.key}">${cell}</td>`;
+      } else if (S.gridView === "day") {
+        const cell = cellDay(p.employee, c.date);
+        html += `<td class="${c.today ? "today-col" : ""}" data-emp="${esc(p.employee)}" data-date="${c.date}">${cell}</td>`;
       } else {
         const cls = [c.today ? "today-col" : "", c.wknd ? "wknd" : ""].filter(Boolean).join(" ");
         const cell = S.gridView === "month" ? cellChips(p.employee, c.date) : cellHTML(p.employee, c.date);
@@ -1776,6 +1782,11 @@ function renderToday() {
   }));
 }
 // grid columns per view
+function dayCols(ws) {
+  const d = isoDate(ws);
+  const wd = new Date(d + "T12:00:00").getDay();
+  return [{ date: d, label: `${DAYN[wd]} ${ws.toLocaleDateString("en-GB", { timeZone: TZ, day: "2-digit", month: "long", year: "numeric" })}`, today: d === todayISO() }];
+}
 function weekCols(ws) {
   const td = todayISO();
   return weekDays(ws).map((d, i) => ({ date: d, label: `${DAYN[i]}<br>${d.slice(5)}`, today: d === td }));
@@ -1891,6 +1902,22 @@ function cellHTML(emp, date) {
     else out.push(`<span class="badge b-notin">—</span>`);
   }
   return out.join("") || "&nbsp;";
+}
+// day-view cell: single column, so show full detail (on-call, requests, in/out times)
+function cellDay(emp, date) {
+  const out = [];
+  const oc = S.oncall.find(o => o.employee === emp && o.date === date);
+  if (oc) out.push(`<span class="badge solid b-oncall" title="On-call">ON-CALL</span>`);
+  for (const r of requestsFor(emp, date)) {
+    const solid = r.status === ST.approved;
+    out.push(`<span class="badge ${solid ? "solid " : "outline "}${typeClass(r.type)}" title="${esc(r.type)} — ${stLabel[r.status] || r.status}">${esc(typeCode(r.type))}</span>`);
+  }
+  const evs = S.signins.filter(x => x.employee === emp && (x.at || "").slice(0, 10) === date);
+  const si = evs.find(x => x.direction === "in");
+  const so = evs.find(x => x.direction === "out");
+  if (si) out.push(`<span class="badge ${si.allowed ? "b-in" : "b-in-out-loc"}" title="Signed in${si.allowed ? " at site" : " outside site"}">${fmtClock(si.at)}</span>`);
+  if (so) out.push(`<span class="badge b-out" title="Signed out">${fmtClock(so.at)}</span>`);
+  return out.join("") || '<span class="m">—</span>';
 }
 function openDetail(emp, date) {
   const p = person(emp);
@@ -2654,13 +2681,19 @@ function renderRegister() {
     }
     return `<tr>${cells}</tr>`;
   }).join("");
-  // exclude strip (permanent)
+  // exclude strip (permanent) — hidden people get a real "Show" checkbox to restore them
   const exclStrip = document.querySelector("[data-reg-hidden-strip]");
   if (exclStrip) {
     const excl = (S_reg.exclude || []).map(String);
     exclStrip.innerHTML = excl.length
-      ? `<div class="reg-note" style="padding:10px 12px"><b>Not shown (all days):</b> ${excl.map(h => { const p = (S_reg.roster || []).find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} <span style="opacity:.6">(#${esc(h)})</span>`; }).join(" · ")} — tick their box again to show them.</div>`
+      ? `<div class="reg-note" style="padding:10px 12px"><b>Hidden (all days) — tick to show again:</b><div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px">${excl.map(h => { const p = (S_reg.roster || []).find(x => String(x.employee) === h); const nm = (p && p.name) || h; return `<label class="reg-vislab" title="Check to show ${esc(nm)} again"><input type="checkbox" class="reg-vis-show" data-emp="${esc(h)}" style="width:15px;height:15px;margin:0;accent-color:var(--accent,#4cc2ff);vertical-align:middle"> ${esc(nm)} <span style="opacity:.6">(#${esc(h)})</span></label>`; }).join("")}</div></div>`
       : "";
+    $$("[data-reg-hidden-strip] .reg-vis-show").forEach(cb => cb.addEventListener("change", async () => {
+      try {
+        await api("/api/register/exclude", { method: "POST", body: { employee: cb.dataset.emp, show: true } });
+        toast("Shown again"); await loadRegister($("#reg-date").value); renderRegister();
+      } catch (e) { toast(e.message, "err"); }
+    }));
   }
   // clickable signature cells (admin adds/edits a signature for a specific day)
   $$("#reg-table .reg-sigcell").forEach(td => {
@@ -3180,6 +3213,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const x = new Date(S.weekStart);
     if (S.gridView === "year") x.setFullYear(x.getFullYear() - 1);
     else if (S.gridView === "month") x.setMonth(x.getMonth() - 1);
+    else if (S.gridView === "day") x.setDate(x.getDate() - 1);
     else x.setDate(x.getDate() - 7);
     S.weekStart = x; await refresh();
   });
@@ -3187,6 +3221,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const x = new Date(S.weekStart);
     if (S.gridView === "year") x.setFullYear(x.getFullYear() + 1);
     else if (S.gridView === "month") x.setMonth(x.getMonth() + 1);
+    else if (S.gridView === "day") x.setDate(x.getDate() + 1);
     else x.setDate(x.getDate() + 7);
     S.weekStart = x; await refresh();
   });
@@ -3195,6 +3230,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $$("#viewtoggle button").forEach(b => b.addEventListener("click", async () => {
     if (S.gridView === b.dataset.view) return;
     S.gridView = b.dataset.view;
+    if (S.gridView === "day") S.weekStart = new Date(); // land on today
     await refresh();
   }));
   $("#gt-search").addEventListener("input", () => { S.gt.search = $("#gt-search").value; renderToday(); });
