@@ -540,6 +540,53 @@ async function handleApi(env, method, path, q, body, m) {
     }
     return { date: d, roster, signins, vacations, sigs: (reg && reg.sigs) || {}, remarks: (reg && reg.remarks) || {}, hidden: (reg && reg.hidden) || [], exclude: Array.isArray(excl) ? excl : [] };
   }
+  // WEEKLY register: sign-ins + signatures for the 5 work days (Sun-Thu) of the
+  // week containing `date`. Returns { week_start, days:[{date, signins[], sigs{}, vacations[]}], roster, exclude }.
+  if (p === "/api/register/week" && method === "GET") {
+    const anchor = regDate((q.date && q.date[0]) || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) return [{ error: "date required (YYYY-MM-DD)" }, 400];
+    const rr = await call(env, "GET",
+      "new_employeeses?$select=new_employeenumber,new_fullname,new_site_default,new_employees_isapprover&$orderby=new_employeenumber&$top=500");
+    if (rr.status !== 200) return [{ error: "roster", code: rr.status }, 500];
+    const adminOnly = new Set(String(env.ADMIN_ONLY_NUMBERS || "").split(",").map(s => s.trim()).filter(Boolean));
+    const roster = (rr.body.value || []).map((x) => ({
+      employee: x.new_employeenumber, name: x.new_fullname,
+      site: x.new_site_default || "", is_approver: x.new_employees_isapprover === APPR_YES,
+      admin_only: adminOnly.has(String(x.new_employeenumber)),
+    }));
+    const a = new Date(anchor + "T00:00:00Z");
+    const dow = a.getUTCDay(); // 0=Sun..6=Sat; days back to the most recent Sunday is just `dow`
+    // week_start = the most recent Sunday (work week is Sun..Thu); Fri/Sat -> last week's Sunday
+    const weekStart = new Date(a.getTime() - dow * 86400000);
+    const days = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(weekStart.getTime() + i * 86400000).toISOString().slice(0, 10);
+      const dayPrev = new Date(new Date(d + "T00:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
+      const sigR = await call(env, "GET",
+        `new_signins?$select=new_signinid,new_signin_name,new_signin_employeenumber,new_signin_datetime,new_signin_direction,new_signin_allowed,new_signin_site&$filter=(new_signin_datetime ge ${dayPrev}T21:00:00Z) and (new_signin_datetime le ${d}T20:59:59Z)&$orderby=new_signin_datetime asc&$top=10000`);
+      const signins = (sigR.status === 200 && isObj(sigR.body))
+        ? (sigR.body.value || []).map((x) => ({
+            id: x.new_signinid, employee: x.new_signin_employeenumber, at: x.new_signin_datetime,
+            direction: x.new_signin_direction === 100000001 ? "in" : "out",
+            allowed: x.new_signin_allowed === 100000001, site: x.new_signin_site || "",
+          })) : [];
+      const vacR = await call(env, "GET",
+        `new_requestses?$select=new_requests_employeenumber,new_requests_name&$filter=(new_requests_type eq 'Vacation') and (new_requests_status eq ${ST_APPROVED}) and (new_requests_date le ${d}T23:59:59Z) and (new_requests_date2 eq null or new_requests_date2 le ${d}T23:59:59Z)&$top=10000`);
+      const vacations = [];
+      if (vacR.status === 200 && isObj(vacR.body)) {
+        for (const x of vacR.body.value || []) {
+          const a2 = d10(x.new_requests_date), b2 = d10(x.new_requests_date2) || a2;
+          if (a2 <= d && b2 >= d) vacations.push({ employee: x.new_requests_employeenumber, name: x.new_requests_name });
+        }
+      }
+      let reg = null;
+      if (kv) { const raw = await kv.get("day:" + d); if (raw) { try { reg = JSON.parse(raw); } catch (e) { reg = null; } } }
+      days.push({ date: d, signins, vacations, sigs: (reg && reg.sigs) || {}, remarks: (reg && reg.remarks) || {} });
+    }
+    let exclList = [];
+    if (kv) { const eraw = await kv.get("reg.exclude"); if (eraw) { try { exclList = JSON.parse(eraw); } catch (e) { exclList = []; } } }
+    return { week_start: weekStart.toISOString().slice(0, 10), days, roster, exclude: Array.isArray(exclList) ? exclList : [] };
+  }
   // GLOBAL exclude list (permanent, all days): checkbox off = person excluded from register + PDF forever.
   if (p === "/api/register/exclude" && method === "POST") {
     if (!kv) return [{ error: "kv unbound" }, 500];

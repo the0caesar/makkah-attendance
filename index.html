@@ -240,9 +240,18 @@ table.grid.compact td.today-col { background: #19262e; }
 .reg-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 14px; }
 .reg-bar input[type="date"] { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; }
 .reg-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
-#reg-table { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 12.5px; }
-#reg-table th { position: sticky; top: 0; background: #10203c; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; padding: 8px 8px; border-bottom: 2px solid var(--border); text-align: left; white-space: nowrap; }
-#reg-table td { padding: 8px; border-bottom: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
+#reg-table { border-collapse: collapse; width: 100%; min-width: 1100px; font-size: 12.5px; }
+#reg-table thead th { position: sticky; top: 0; background: #10203c; color: var(--muted); font-size: 11px; letter-spacing: .3px; padding: 6px 6px; border: 1px solid var(--border); text-align: center; white-space: nowrap; z-index: 2; }
+#reg-table thead tr:nth-child(2) th { top: 30px; font-size: 10px; }
+#reg-table th.reg-h-sticky { position: sticky; left: 0; background: #10203c; z-index: 3; }
+#reg-table th.reg-dayhead { font-size: 12px; padding: 4px; }
+#reg-table th.reg-dayhead .wd { display: block; font-size: 12px; }
+#reg-table th.reg-dayhead .dn { display: block; font-size: 11px; color: var(--accent, #4cc2ff); font-variant-numeric: tabular-nums; }
+#reg-table th.reg-subh { font-size: 10px; }
+#reg-table td { padding: 6px; border: 1px solid rgba(255,255,255,.07); vertical-align: middle; }
+#reg-table td.reg-timecell { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 52px; }
+#reg-table td.reg-sigcell { min-width: 58px; }
+#reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
 #reg-table .sig-img { height: 24px; width: auto; display: block; background: #fff; padding: 2px 4px; border-radius: 4px; }
@@ -430,20 +439,17 @@ table.grid.compact td.today-col { background: #19262e; }
     </div>
     <div id="tab-register" class="admin-tab">
       <div class="reg-bar">
-        <input type="date" id="reg-date">
+        <button class="btn ghost" id="reg-prev">‹</button>
+        <input type="date" id="reg-date" title="Pick any day — the week shown is the one it falls in (Sun–Thu)">
+        <button class="btn ghost" id="reg-next">›</button>
         <button class="btn ghost" id="reg-refresh">↻ Refresh</button>
         <button class="btn ghost" id="reg-add-sig">✍ Add signature</button>
-        <button class="btn primary" id="reg-pdf">⬇ Download PDF</button>
+        <button class="btn primary" id="reg-pdf">⬇ Download PDF (week)</button>
         <span class="hint" id="reg-status"></span>
       </div>
       <div class="reg-wrap">
         <table id="reg-table">
-          <thead><tr>
-            <th>#</th><th>Name</th><th>Section</th><th>Emp #</th><th>Site</th>
-            <th>Sign-in time</th><th>Sign-in signature</th>
-            <th>Sign-out time</th><th>Sign-out signature</th>
-            <th>Notes</th>
-          </tr></thead>
+          <thead><tr id="reg-thead-1"></tr><tr id="reg-thead-2"></tr></thead>
           <tbody></tbody>
         </table>
         <div data-reg-hidden-strip></div>
@@ -2538,127 +2544,127 @@ const AR_NAMES = Object.freeze({
   '97014': 'جميل غالب القرشي',
   '97016': 'الياس سفيان محمد',
 });
-let S_reg = null; // {date, roster, signins, vacations, sigs, remarks}
-async function loadRegister(date) {
-  S_reg = await api(`/api/register?date=${date}`);
+let S_reg = null; // WEEKLY: { week_start, days:[{date,signins,vacations,sigs,remarks}], roster, exclude }
+// Per-day sign-in/out index: S_reg.dayMap[date] -> { si:{emp:rec}, so:{emp:rec}, vac:Set, sigs:{}, remarks:{} }
+let S_regMap = null;
+function weekKey(iso) { // ISO date -> ISO of the Sunday of its Sun..Thu week
+  const a = new Date(iso + "T00:00:00Z");
+  return new Date(a.getTime() - a.getUTCDay() * 86400000).toISOString().slice(0, 10);
+}
+async function loadRegister(anchor) {
+  S_reg = await api(`/api/register/week?date=${anchor}`);
+  S_regMap = {};
+  for (const day of S_reg.days) {
+    const si = {}, so = {};
+    for (const s of day.signins) { const e = String(s.employee); if (s.direction === "in") si[e] = s; else so[e] = s; }
+    S_regMap[day.date] = { si, so, vac: new Set(day.vacations.map(v => String(v.employee))), sigs: day.sigs || {}, remarks: day.remarks || {} };
+  }
 }
 function astDayOffset(iso) { return new Date(iso + "T00:00:00Z"); }
+function isoAddDays(iso, n) { return new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10); }
+// The 5 work days Sun..Thu of S_reg (or from week_start)
+function regDays() { return (S_reg && S_reg.days) ? S_reg.days.map(d => d.date) : []; }
 function renderRegister() {
-  const d = S_reg ? S_reg.date : null;
   if (!S_reg) return;
   const tbody = $("#reg-table tbody");
-  const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
-  // signin/out times per person (AST clock)
-  const siBy = {}, soBy = {};
-  for (const s of S_reg.signins) {
-    const e = String(s.employee);
-    if (s.direction === "in") siBy[e] = s; else soBy[e] = s;
-  }
-  // Permanent exclude list (all days). Number the VISIBLE people 1..N (first shown = #1),
-  // same as the PDF — hidden people leave no gaps.
+  const thead1 = $("#reg-thead-1"), thead2 = $("#reg-thead-2");
+  const days = regDays();
   const hiddenSet = new Set((S_reg.exclude || []).map(String));
   const rows = S_reg.roster.filter(p => !hiddenSet.has(String(p.employee)))
     .sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
-  const dayLabel = new Date(astDayOffset(d).getTime() + 3 * 3600000).toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+  const arName = (e) => AR_NAMES[String(e)] || "";
+  // ---- two-row header ----
+  thead1.innerHTML =
+    `<th class="reg-h-sticky">#</th><th class="reg-h-sticky">Name</th><th class="reg-h-sticky">Emp #</th>` +
+    days.map(dd => {
+      const dt = new Date(new Date(dd + "T00:00:00Z").getTime() + 3 * 3600000);
+      const wd = dt.toLocaleDateString("ar-EG", { weekday: "short", timeZone: "UTC" });
+      const dnum = String(dt.getUTCDate()).padStart(2, "0");
+      return `<th colspan="2" class="reg-dayhead" dir="rtl"><span class="wd">${wd}</span><span class="dn" dir="ltr">${dnum}</span></th>`;
+    }).join("");
+  thead2.innerHTML =
+    `<th class="reg-h-sticky"></th><th class="reg-h-sticky"></th><th class="reg-h-sticky"></th>` +
+    days.map(() => `<th class="reg-subh">وقت الحضور</th><th class="reg-subh">التوقيع</th>`).join("");
+  // ---- body ----
   tbody.innerHTML = rows.map((p, i) => {
     const e = String(p.employee);
-    const isVac = vacSet.has(e);
-    const si = siBy[e], so = soBy[e];
-    const signedIn = !!si && si.allowed;
-    const needsReview = !isVac && !signedIn;
-    const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
-    const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
-    const rem = S_reg.remarks[e];
-    // الموقع = the site they signed in from that day (falls back to their default site)
-    const siteOf = (si && si.site) ? si.site : (so && so.site ? so.site : p.site);
-    const noteHtml = isVac
-      ? `<span class="reg-note">Vacation</span>`
-      : (needsReview
-        ? `<span class="reg-flag">NEEDS REVIEW</span>` + (rem ? `<div class="reg-remark-by">${esc(rem.text)} — ${esc(String(rem.by).split("@")[0])}</div>` : "")
-        : (rem ? `<span class="reg-note">${esc(rem.text)}</span>` : ""));
-    const remarkInput = needsReview && S.me.is_approver
-      ? `<input class="reg-remark" data-emp="${e}" value="${esc(rem ? rem.text : "")}" placeholder="Admin remark">`
-      : "";
-    // checkbox: checked = shown, unchecked = hidden (permanent, all days) — admin only
     const visBox = S.me.is_approver
       ? `<label class="reg-vislab" title="Checked = shown, unchecked = hidden (permanent, all days)"><input type="checkbox" class="reg-vis" data-emp="${e}" ${!hiddenSet.has(e) ? "checked" : ""}></label>`
       : "";
-    return `<tr class="${isVac ? "vac" : needsReview ? "review" : ""}">
-      <td class="reg-numcell">${visBox}<span class="reg-num">${i + 1}</span></td>
-      <td><b>${esc(p.name)}</b></td>
-      <td>${isVac ? "—" : REG_SECTION}</td>
-      <td>${esc(e)}</td>
-      <td>${esc(siteOf || "—")}</td>
-      <td class="reg-timecell time">${si ? esc(fmtClock(si.at)) : ""}${S.me.is_approver && si ? `<button class="btn ghost sm reg-edit" data-id="${esc(si.id)}" data-dir="in" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>
-      <td class="reg-sigcell" data-emp="${e}" data-dir="in" title="Tap to add/edit sign-in signature">${sigIn ? `<img class="sig-img" src="${sigIn}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigIn ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="in" title="Remove this signature">✕</button>` : ""}</td>
-      <td class="reg-timecell time">${so ? esc(fmtClock(so.at)) : ""}${S.me.is_approver && so ? `<button class="btn ghost sm reg-edit" data-id="${esc(so.id)}" data-dir="out" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>
-      <td class="reg-sigcell" data-emp="${e}" data-dir="out" title="Tap to add/edit sign-out signature">${sigOut ? `<img class="sig-img" src="${sigOut}" alt="">` : '<span class="reg-note">✍</span>'}${S.me.is_approver && sigOut ? `<button class="btn ghost sm reg-sigclear" data-emp="${e}" data-dir="out" title="Remove this signature">✕</button>` : ""}</td>
-      <td>${noteHtml}${remarkInput}${needsReview && S.me.is_approver ? `<button class="btn ghost sm" data-remark-save="${e}">Save remark</button>` : ""}</td>
-    </tr>`;
+    let cells = `<td class="reg-numcell">${visBox}<span class="reg-num">${i + 1}</span></td><td><b>${esc(arName(e) || p.name)}</b></td><td class="ltr">${esc(e)}</td>`;
+    for (const dd of days) {
+      const m = S_regMap[dd]; if (!m) continue;
+      const si = m.si[e], so = m.so[e];
+      const isVac = m.vac.has(e);
+      const sigIn = (m.sigs[e] && m.sigs[e].in && m.sigs[e].in.data) || null;
+      const sigOut = (m.sigs[e] && m.sigs[e].out && m.sigs[e].out.data) || null;
+      const timeCell = (dir, rec) => {
+        if (isVac) return `<td class="reg-timecell vac">—</td>`;
+        return `<td class="reg-timecell time">${rec ? esc(fmtClock(rec.at)) : ""}${S.me.is_approver && rec ? `<button class="btn ghost sm reg-edit" data-date="${dd}" data-id="${esc(rec.id)}" data-dir="${dir}" title="Edit time/site — or delete this sign-in">✎</button>` : ""}</td>`;
+      };
+      const sigCell = (dir, data) => {
+        if (isVac) return `<td class="reg-sigcell vac">—</td>`;
+        return `<td class="reg-sigcell" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Tap to add/edit signature">${data ? `<img class="sig-img" src="${data}" alt="">` : ""}${S.me.is_approver && data ? `<button class="btn ghost sm reg-sigclear" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Remove this signature">✕</button>` : ""}</td>`;
+      };
+      cells += timeCell("in", si) + sigCell("in", sigIn) + timeCell("out", so) + sigCell("out", sigOut);
+    }
+    return `<tr>${cells}</tr>`;
   }).join("");
-  // remark save (button always present on NEEDS REVIEW rows for admins)
-  $$("#reg-table [data-remark-save]").forEach(b => {
-    const inp = $(`#reg-table .reg-remark[data-emp="${b.dataset.remarkSave}"]`);
-    if (!inp) return;
-    b.addEventListener("click", async () => {
-      try {
-        await api("/api/register/remark", { method: "POST", body: { date: S_reg.date, employee: b.dataset.remarkSave, text: inp.value.trim() } });
-        toast("Remark saved"); await loadRegister(S_reg.date); renderRegister();
-      } catch (e) { toast(e.message, "err"); }
+  // exclude strip (permanent)
+  const exclStrip = document.querySelector("[data-reg-hidden-strip]");
+  if (exclStrip) {
+    const excl = (S_reg.exclude || []).map(String);
+    exclStrip.innerHTML = excl.length
+      ? `<div class="reg-note" style="padding:10px 12px"><b>Not shown (all days):</b> ${excl.map(h => { const p = (S_reg.roster || []).find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} <span style="opacity:.6">(#${esc(h)})</span>`; }).join(" · ")} — tick their box again to show them.</div>`
+      : "";
+  }
+  // clickable signature cells (admin adds/edits a signature for a specific day)
+  $$("#reg-table .reg-sigcell").forEach(td => {
+    if (td.dataset.date) td.addEventListener("click", () => {
+      if (td.querySelector(".sig-img") && !S.me.is_approver) return;
+      sigDate = td.dataset.date;
+      openSigModal(td.dataset.emp, td.dataset.dir);
     });
   });
-  // clickable signature cells (admin adds/edits any person's signature from the register)
-  $$("#reg-table .reg-sigcell").forEach(td => td.addEventListener("click", () => {
-    sigDate = S_reg.date; // save to the register's selected day
-    openSigModal(td.dataset.emp, td.dataset.dir);
-  }));
-  // ✕ clear a signature (admin only) — stopPropagation so the cell doesn't re-open the modal
+  // ✕ clear a signature (admin only) — two-step (native confirm() suppressed in Teams)
   $$("#reg-table .reg-sigclear").forEach(b => b.addEventListener("click", async (ev) => {
     ev.stopPropagation();
-    // two-step: native confirm() is suppressed inside the Teams iframe
     if (b.dataset.arm) {
       delete b.dataset.arm; b.textContent = "✕";
       try {
-        await api(`/api/register/sig?date=${S_reg.date}&employee=${encodeURIComponent(b.dataset.emp)}&direction=${b.dataset.dir}`, { method: "DELETE" });
-        toast("Signature removed"); await loadRegister(S_reg.date); renderRegister();
+        await api(`/api/register/sig?date=${b.dataset.date}&employee=${encodeURIComponent(b.dataset.emp)}&direction=${b.dataset.dir}`, { method: "DELETE" });
+        toast("Signature removed"); await loadRegister($("#reg-date").value); renderRegister();
       } catch (e) { toast(e.message, "err"); }
       return;
     }
     b.dataset.arm = "1"; b.textContent = "Confirm?";
     setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = "✕"; } }, 3000);
   }));
-  // ✎ edit time/site or delete a sign-in (admin only). Time input is HH:MM in AST.
+  // ✎ edit time/site or delete a sign-in (admin only)
   $$("#reg-table .reg-edit").forEach(b => b.addEventListener("click", () => {
-    const rec = (S_reg.signins || []).find(x => x.id === b.dataset.id);
+    const date = b.dataset.date;
+    const rec = ((S_regMap[date] && S_regMap[date][b.dataset.dir === "in" ? "si" : "so"]) || {})[b.dataset.id];
     if (!rec) return toast("Sign-in not found", "err");
     const dir = b.dataset.dir;
     const m = $("#editsig-modal");
     m.style.display = "flex";
-    $("#editsig-title").textContent = `Edit ${dir === "in" ? "sign-in" : "sign-out"} — ${S_reg.roster.find(x => String(x.employee) === String(rec.employee))?.name || rec.employee}`;
+    m.dataset.editDate = date;
+    const nm = S_reg.roster.find(x => String(x.employee) === String(rec.employee));
+    $("#editsig-title").textContent = `Edit ${dir === "in" ? "sign-in" : "sign-out"} — ${nm ? (AR_NAMES[String(nm.employee)] || nm.name) : rec.employee} (${date})`;
     const hms = new Date(rec.at).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     $("#editsig-time").value = hms;
     const siteSel = $("#editsig-site");
     siteSel.innerHTML = "";
     const sites = S.sites || [];
     const curSite = rec.site || "";
-    // If the stored site is missing from the DB list, still show it (so we don't lose it)
     if (curSite && !sites.some(s => (s.name || s.id) === curSite)) {
-      const o = document.createElement("option");
-      o.value = curSite; o.textContent = curSite + " (not in list)";
-      o.selected = true;
-      siteSel.appendChild(o);
+      const o = document.createElement("option"); o.value = curSite; o.textContent = curSite + " (not in list)"; o.selected = true; siteSel.appendChild(o);
     }
     sites.forEach(s => {
-      const nm = s.name || s.id;
-      const o = document.createElement("option");
-      o.value = nm; o.textContent = nm;
-      if (nm === curSite) o.selected = true;
-      siteSel.appendChild(o);
+      const nm2 = s.name || s.id; const o = document.createElement("option");
+      o.value = nm2; o.textContent = nm2; if (nm2 === curSite) o.selected = true; siteSel.appendChild(o);
     });
-    if (!curSite && sites.length) {
-      // no stored site -> pick first by default
-      siteSel.selectedIndex = 0;
-    }
+    if (!curSite && sites.length) siteSel.selectedIndex = 0;
     let armDel = false;
     const del = $("#editsig-delete");
     del.onclick = async () => {
@@ -2667,46 +2673,38 @@ function renderRegister() {
       try {
         await api("/api/admin/signins/delete", { method: "POST", body: { id: rec.id } });
         m.style.display = "none";
-        toast("Sign-in deleted"); await loadRegister(S_reg.date); renderRegister();
+        toast("Sign-in deleted"); await loadRegister($("#reg-date").value); renderRegister();
       } catch (e) { toast(e.message, "err"); }
     };
     $("#editsig-cancel").onclick = () => { m.style.display = "none"; };
     $("#editsig-save").onclick = async () => {
       const tm = $("#editsig-time").value; if (!tm) return toast("Enter a time", "err");
       const [hh, mm] = tm.split(":");
-      // combine with the sign-in's date in AST, then emit a UTC ISO (worker stores it as-is)
-      const dt = new Date(astDayOffset(S_reg.date).getTime() + (parseInt(hh, 10) * 60 + parseInt(mm, 10) - 180) * 60000);
+      const dt = new Date(astDayOffset(m.dataset.editDate).getTime() + (parseInt(hh, 10) * 60 + parseInt(mm, 10) - 180) * 60000);
       const payload = { id: rec.id, datetime: dt.toISOString(), site: $("#editsig-site").value.trim() };
       try {
         await api("/api/admin/signins/update", { method: "POST", body: payload });
         m.style.display = "none";
-        toast("Sign-in updated"); await loadRegister(S_reg.date); renderRegister();
+        toast("Sign-in updated"); await loadRegister($("#reg-date").value); renderRegister();
       } catch (e) { toast(e.message, "err"); }
     };
   }));
-  // checkbox: checked = shown, unchecked = hidden — PERMANENT (all days). Admin only.
+  // permanent exclude checkboxes (admin): checked = shown, unchecked = hidden (all days)
   $$("#reg-table .reg-vis").forEach(cb => cb.addEventListener("change", async () => {
     try {
       await api("/api/register/exclude", { method: "POST", body: { employee: cb.dataset.emp, show: cb.checked } });
-      toast(cb.checked ? "Shown in register" : "Hidden from register (all days)");
-      await loadRegister(S_reg.date); renderRegister();
-    } catch (e) { toast(e.message, "err"); cb.checked = !cb.checked; }
+      await loadRegister($("#reg-date").value); renderRegister();
+    } catch (e) { toast(e.message, "err"); }
   }));
-  // strip: people currently excluded (all days) so an admin can see them
-  const strip = $("[data-reg-hidden-strip]");
-  if (strip && S.me.is_approver) {
-    const excl = (S_reg.exclude || []).map(String);
-    strip.innerHTML = excl.length
-      ? `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,.2);border-radius:8px;font-size:12.5px">
-          <b>Not shown (all days):</b> ${excl.map(h => { const p = (S_reg.roster || []).find(x => String(x.employee) === h); return `${esc((p && p.name) || h)} <span style="opacity:.6">(#${esc(h)})</span>`; }).join(" · ")} — tick their box again to show them.</div>`
-      : "";
-  }
-  $("#reg-status").textContent = `${dayLabel} • ${rows.length} staff • ${rows.filter(p => vacSet.has(String(p.employee))).length} on vacation` + ((S_reg.exclude || []).length ? ` • ${(S_reg.exclude || []).length} not shown` : "");
+  // status line
+  const ws = S_reg.week_start;
+  $("#reg-status").textContent = `${ws} → ${S_reg.days[4].date} • ${rows.length} staff` + ((S_reg.exclude || []).length ? ` • ${(S_reg.exclude || []).length} not shown` : "");
 }
 function renderRegisterScreen() {
   const input = $("#reg-date");
   if (!input.value) input.value = todayISO();
-  if (!S_reg || S_reg.date !== input.value) {
+  // Re-load if the selected date is a DIFFERENT week than what's cached.
+  if (!S_reg || weekKey(input.value) !== S_reg.week_start) {
     $("#reg-status").textContent = "Loading…";
     loadRegister(input.value).then(() => renderRegister()).catch(e => { $("#reg-status").textContent = "Error: " + e.message; });
   } else if (S_reg) {
@@ -2820,7 +2818,7 @@ function openSigModal(emp, direction) {
       committed = data;
       modal.style.display = "none";
       toast("Signature saved ✓");
-      if (S_reg && S_reg.date === targetDate) { await loadRegister(targetDate); renderRegister(); }
+      if (S_reg && weekKey(targetDate) === S_reg.week_start) { await loadRegister($("#reg-date").value || S_reg.week_start); renderRegister(); }
     } catch (e) {
       toast(e.message, "err");
     } finally {
@@ -2836,27 +2834,39 @@ function openSigModal(emp, direction) {
 // they actually signed. (Normally a signature is drawn right after signing; this is
 // a fallback if one got skipped.)
 function openRegSigPicker() {
-  if (!S_reg) return toast("Load a day first", "err");
-  // Which directions each person has for THIS day?
-  const signed = {}; // employee -> { in: bool, out: bool }
-  (S_reg.signins || []).forEach(s => {
-    if (!signed[s.employee]) signed[s.employee] = { in: false, out: false };
-    if (s.direction === "in") signed[s.employee].in = true;
-    else signed[s.employee].out = true;
-  });
+  if (!S_reg) return toast("Load a week first", "err");
+  // Which days each person signed in/out for THIS week?
+  const signed = {}; // employee -> { in: {date:true}, out: {date:true} }
+  for (const day of S_reg.days) {
+    for (const s of day.signins) {
+      const e = String(s.employee);
+      if (!signed[e]) signed[e] = { in: {}, out: {} };
+      if (s.direction === "in") signed[e].in[day.date] = true;
+      else signed[e].out[day.date] = true;
+    }
+  }
   const signedEmps = Object.keys(signed).length;
+  const days = regDays();
+  const dayOpts = days.map(dd => {
+    const dt = new Date(new Date(dd + "T00:00:00Z").getTime() + 3 * 3600000);
+    const wd = dt.toLocaleDateString("ar-EG", { weekday: "short", timeZone: "UTC" });
+    const dnum = String(dt.getUTCDate()).padStart(2, "0");
+    return `<option value="${dd}">${wd} ${dnum}</option>`;
+  }).join("");
   const opts = S_reg.roster.slice().sort((a, b) => String(a.employee).localeCompare(String(b.employee)))
-    .filter(p => signed[p.employee])   // ONLY people who signed that day
-    .map(p => `<option value="${esc(p.employee)}">${esc(p.name)} (${esc(String(p.employee))})</option>`).join("");
+    .filter(p => signed[p.employee])
+    .map(p => `<option value="${esc(p.employee)}">${esc(AR_NAMES[String(p.employee)] || p.name)} (${esc(String(p.employee))})</option>`).join("");
   const old = document.querySelector("#pks-modal"); if (old) old.remove();
   const div = document.createElement("div");
   div.id = "pks-modal";
   div.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px";
   div.innerHTML = `<div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;width:100%;max-width:440px">
     <div style="font-weight:700;margin-bottom:6px">Add signature</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Only people who signed in/out on ${esc(S_reg.date)} are listed.</div>
-    ${signedEmps ? `<select id="pks-p" style="width:100%;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px">${opts}</select>`
-                 : `<div style="padding:10px;text-align:center;color:var(--muted)">No one has signed ${esc(S_reg.date)} yet.</div>`}
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Only people who signed in/out during the week of ${esc(S_reg.week_start)} are listed.</div>
+    ${signedEmps ? `
+      <select id="pks-p" style="width:100%;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px">${opts}</select>
+      <select id="pks-day" style="width:100%;padding:6px;margin-top:8px;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px">${dayOpts}</select>`
+                 : `<div style="padding:10px;text-align:center;color:var(--muted)">No one has signed this week yet.</div>`}
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn primary" id="pks-in">Add sign-in signature</button>
       <button class="btn primary" id="pks-out">Add sign-out signature</button>
@@ -2868,11 +2878,12 @@ function openRegSigPicker() {
   div.addEventListener("click", e => { if (e.target === div) close(); });
   $("#pks-cancel").addEventListener("click", close);
   const pick = (dir) => {
-    const v = $("#pks-p"); if (!v) return toast("No one signed this day", "err");
+    const v = $("#pks-p"); if (!v) return toast("No one signed this week", "err");
     const emp = v.value;
     if (!emp) return toast("Pick a person first", "err");
-    if (!signed[emp] || !signed[emp][dir]) return toast("That person didn't sign " + dir + " this day", "err");
-    sigDate = S_reg.date;      // pad will save to THIS day's bucket
+    const dd = $("#pks-day").value;
+    if (!signed[emp] || !signed[emp][dir][dd]) return toast(`That person didn't sign ${dir} on ${dd}`, "err");
+    sigDate = dd;      // pad will save to THAT day's bucket
     close(); openSigModal(emp, dir);
   };
   $("#pks-in").addEventListener("click", () => pick("in"));
@@ -2886,84 +2897,89 @@ function promptSignature(direction) {
   catch (e2) { console.warn("sig prompt failed", e2); }
 }
 async function regPdf() {
-  if (!S_reg) return toast("Load a day first", "err");
+  if (!S_reg) return toast("Load a week first", "err");
   if (!window.jspdf || !window.jspdf.jsPDF) return toast("PDF engine not loaded", "err");
   if (typeof window.html2canvas === "undefined") return toast("PDF image engine not loaded", "err");
   const { jsPDF } = window.jspdf;
   toast("Building PDF\u2026");
   const T_TITLE = "\u0633\u062c\u0644 \u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u062d\u0636\u0648\u0631 \u0627\u0644\u064a\u0648\u0645\u064a \u0644\u0645\u0648\u0636\u0641\u064a \u062f\u0627\u0626\u0631\u0629 \u0627\u0644\u062d\u0645\u0627\u064a\u0629 \u0648\u0627\u0644\u0625\u062e\u062a\u0628\u0627\u062a";
-  const T_DAY = "\u0627\u0644\u064a\u0648\u0645 :";
-  const T_DATE = "\u0627\u0644\u062a\u0627\u0631\u064a\u062e :";
+  const T_SUB = "\u0645\u062f\u064a\u0631 \u0627\u0644\u062f\u0627\u0626\u0631\u0629 \u0648\u0645\u0648\u0638\u0641\u0648\u0647";
+  const T_WEEK = "\u0627\u0644\u0623\u0633\u0628\u0648\u0639 \u0631\u0642\u0645 :";
+  const T_IN = "\u0627\u0644\u062d\u0636\u0648\u0631";
+  const T_OUT = "\u0627\u0644\u0627\u0646\u0635\u0631\u0627\u0641";
+  const T_TIME = "\u0627\u0644\u0648\u0642\u062a";
+  const T_SIG = "\u0627\u0644\u062a\u0648\u0642\u064a\u0639";
   const T_VAC = "\u0625\u062c\u0627\u0632\u0629";
-  const T_REVIEW = "\u064a\u062d\u062a\u0627\u062c \u0645\u0631\u0627\u062c\u0639\u0629";
-  // exact Excel header order (B..J): name, section, emp#, site, in-time, in-sig, out-time, out-sig, notes
-  const T_HEADS = ["\u0627\u0644\u0627\u0633\u0645", "\u0627\u0644\u0642\u0633\u0645", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0648\u0638\u064a\u0641\u064a", "\u0627\u0644\u0645\u0648\u0642\u0639", "\u0648\u0642\u062a \u0627\u0644\u062d\u0636\u0648\u0631", "\u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u062d\u0636\u0648\u0631", "\u0648\u0642\u062a \u0627\u0644\u0627\u0646\u0635\u0631\u0627\u0641", "\u062a\u0648\u0642\u064a\u0639 \u0627\u0644\u0627\u0646\u0635\u0631\u0627\u0641", "\u0645\u0644\u0627\u062d\u0638\u0627\u062a"];
-  // exact Excel column widths (px, from template_kashaf.xlsx): A=#,B=name,C=section,D=emp#,E=site,F=in-time,G=in-sig,H=out-time,I=out-sig,J=notes
-  const COLW = [59, 291, 150, 90, 190, 90, 215, 90, 256, 90];
+  const days = regDays();
   (async () => {
     let node = null;
     try {
-      const d = S_reg.date;
-      const vacSet = new Set(S_reg.vacations.map(v => String(v.employee)));
-      const siBy = {}, soBy = {};
-      for (const s of S_reg.signins) { const e = String(s.employee); if (s.direction === "in") siBy[e] = s; else soBy[e] = s; }
-      // drop permanently-excluded people; sort by ID number; number the VISIBLE rows 1..N
-      // (the first person shown is #1) — hidden people don't leave gaps.
       const exclSet = new Set((S_reg.exclude || []).map(String));
       const rows = S_reg.roster.filter(p => !exclSet.has(String(p.employee))).sort((a, b) => (parseInt(String(a.employee), 10) || 0) - (parseInt(String(b.employee), 10) || 0));
-      const dDate = new Date(astDayOffset(d).getTime() + 3 * 3600000);
-      const dayAr = dDate.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
-      const dateLabel = String(dDate.getUTCDate()).padStart(2, "0") + " / " + String(dDate.getUTCMonth() + 1).padStart(2, "0") + " / " + dDate.getUTCFullYear();
-      const arName = (e) => (AR_NAMES[String(e)] || "");
-      const headRow = "<th></th>" + T_HEADS.map(h => "<th>" + h + "</th>").join("");
-      const bodyRows = rows.map((p, i) => {
-        const e = String(p.employee); const isVac = vacSet.has(e);
-        const si = siBy[e], so = soBy[e]; const needsReview = !isVac && !(!!si && si.allowed);
-        const sigIn = (S_reg.sigs[e] && S_reg.sigs[e].in && S_reg.sigs[e].in.data) || null;
-        const sigOut = (S_reg.sigs[e] && S_reg.sigs[e].out && S_reg.sigs[e].out.data) || null;
-        const rem = S_reg.remarks[e];
-        const nm = arName(e) ? arName(e) : esc(p.name);
-        const siteOf = (si && si.site) ? si.site : (so && so.site ? so.site : p.site);
-        const note = isVac ? T_VAC : (needsReview ? T_REVIEW + (rem && rem.text ? "<br>" + esc(rem.text) : "") : (rem && rem.text ? esc(rem.text) : ""));
-        const sig = (src) => src ? '<img class="sigimg" src="' + src + '">' : "";
-        return "<tr>" +
-          "<td class='ctr'>" + (i + 1) + "</td>" +
-          '<td class="arname">' + nm + "</td>" +
-          "<td>" + (isVac ? "\u2014" : esc(REG_SECTION)) + "</td>" +
-          '<td class="ltr">' + esc(e) + "</td>" +
-          "<td>" + esc(siteOf || "\u2014") + "</td>" +
-          '<td class="ltr ctr">' + (si ? esc(fmtClock(si.at)) : "") + "</td>" +
-          '<td class="sigc">' + sig(sigIn) + "</td>" +
-          '<td class="ltr ctr">' + (so ? esc(fmtClock(so.at)) : "") + "</td>" +
-          '<td class="sigc">' + sig(sigOut) + "</td>" +
-          '<td class="note">' + note + "</td>" +
-          "</tr>";
+      const ws = S_reg.week_start;
+      const d0 = new Date(new Date(ws + "T00:00:00Z").getTime() + 3 * 3600000);
+      const d4 = new Date(new Date(days[4] + "T00:00:00Z").getTime() + 3 * 3600000);
+      const year = d0.getUTCFullYear();
+      // ISO-8601 week number of the week's Wednesday
+      const wed = new Date(Date.UTC(year, d0.getUTCMonth(), d0.getUTCDate() + 2));
+      const jan1 = new Date(Date.UTC(year, 0, 1));
+      const wkNo = Math.ceil(((wed - jan1) / 86400000 + jan1.getUTCDay() + 1) / 7);
+      const fmtD = (x) => `${String(x.getUTCDate()).padStart(2, "0")}/${String(x.getUTCMonth() + 1).padStart(2, "0")}/${x.getUTCFullYear()}`;
+      const arName = (e) => AR_NAMES[String(e)] || "";
+      // column widths (px): # 30, name 175, emp# 60, then per day: in-time 46, in-sig 54, out-time 46, out-sig 54
+      const dayCols = [46, 54, 46, 54];
+      const baseW = [30, 175, 60];
+      const totalW = baseW.reduce((a, b) => a + b, 0) + days.length * dayCols.reduce((a, b) => a + b, 0);
+      const colgroup = "<colgroup>" + baseW.map(w => `<col style="width:${w}px">`).join("") +
+        days.map(() => dayCols.map(w => `<col style="width:${w}px">`).join("")).join("") + "</colgroup>";
+      const dayHead1 = days.map(dd => {
+        const dt = new Date(new Date(dd + "T00:00:00Z").getTime() + 3 * 3600000);
+        const wd = dt.toLocaleDateString("ar-EG", { weekday: "long", timeZone: "UTC" });
+        const dnum = String(dt.getUTCDate()).padStart(2, "0");
+        return `<th colspan="4" class="dayh"><div dir="rtl">${wd}</div><div dir="ltr">${dnum}/${String(dt.getUTCMonth() + 1).padStart(2, "0")}</div></th>`;
       }).join("");
-      const colgroup = "<colgroup>" + COLW.map(w => '<col style="width:' + w + 'px">').join("") + "</colgroup>";
-      const pageCss = "#pdfpage{font-family:Arial,'Segoe UI',Tahoma,sans-serif;background:#fff;color:#000}" +
-        "#pdfpage .pg{width:1521px;box-sizing:border-box;position:relative}" +
-        "#pdfpage .head{position:relative;height:70px}" +
-        "#pdfpage .logo{position:absolute;right:6px;top:8px;height:44px}" +
-        "#pdfpage .title{position:absolute;left:0;right:150px;top:0;height:70px;display:flex;align-items:center;justify-content:center;font:bold 24px Arial;text-align:center;padding:0 6px}" +
-        "#pdfpage .dd{font:bold 15px Arial;padding:6px 0 10px;display:flex;justify-content:center;align-items:baseline;gap:34px}" +
-        "#pdfpage .dd .fld{white-space:nowrap;unicode-bidi:isolate}" +
-        "#pdfpage table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}" +
-        "#pdfpage th,#pdfpage td{border:1px solid #111;padding:4px 4px;text-align:center;vertical-align:middle;overflow:hidden;word-break:break-word}" +
-        "#pdfpage thead th{font:bold 13px Arial;padding:6px 4px}" +
-        "#pdfpage tbody tr{height:30px}#pdfpage tbody td{height:30px}" +
-        "#pdfpage td.arname{font:bold 13px 'Segoe UI',Tahoma,Arial;text-align:center}" +
-        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{height:30px;background:#fff}" +
-        "#pdfpage .sigimg{width:96px;height:24px;object-fit:contain;display:block;margin:0 auto;background:#fff}" +
-        "#pdfpage td.note{font-size:11px;line-height:1.35}";
+      const dayHead2 = days.map(() => `<th class="subh">${T_IN}<br>${T_TIME}</th><th class="subh">${T_SIG}</th><th class="subh">${T_OUT}<br>${T_TIME}</th><th class="subh">${T_SIG}</th>`).join("");
+      const body = rows.map((p, i) => {
+        const e = String(p.employee);
+        let cells = `<td class="ctr">${i + 1}</td><td class="arname">${esc(arName(e) || p.name)}</td><td class="ltr ctr">${esc(e)}</td>`;
+        for (const dd of days) {
+          const m = S_regMap[dd]; if (!m) continue;
+          const si = m.si[e], so = m.so[e];
+          const isVac = m.vac.has(e);
+          const sigIn = (m.sigs[e] && m.sigs[e].in && m.sigs[e].in.data) || null;
+          const sigOut = (m.sigs[e] && m.sigs[e].out && m.sigs[e].out.data) || null;
+          const tcell = (rec) => isVac ? `<td>${T_VAC}</td>` : `<td class="ltr ctr">${rec ? esc(fmtClock(rec.at)) : ""}</td>`;
+          const scell = (data) => isVac ? `<td></td>` : `<td class="sigc">${data ? `<img class="sigimg" src="${data}">` : ""}</td>`;
+          cells += tcell(si) + scell(sigIn) + tcell(so) + scell(sigOut);
+        }
+        return "<tr>" + cells + "</tr>";
+      }).join("");
+      const pageCss =
+        "#pdfpage{font-family:Arial,'Segoe UI',Tahoma,sans-serif;background:#fff;color:#000}" +
+        `#pdfpage .pg{width:${totalW}px;box-sizing:border-box;position:relative}` +
+        "#pdfpage .head{position:relative;height:64px}" +
+        "#pdfpage .logo{position:absolute;right:4px;top:6px;height:40px}" +
+        "#pdfpage .title{position:absolute;left:0;right:120px;top:0;height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;font:bold 19px Arial;text-align:center;line-height:1.3}" +
+        "#pdfpage .sub{font-size:13px;font-weight:normal;margin-top:2px}" +
+        "#pdfpage .weekline{display:flex;justify-content:center;align-items:baseline;gap:10px;padding:6px 0 8px;font:bold 14px Arial}" +
+        "#pdfpage .weekline .fld{unicode-bidi:isolate;white-space:nowrap}" +
+        "#pdfpage table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}" +
+        "#pdfpage th,#pdfpage td{border:1px solid #111;padding:3px;vertical-align:middle;overflow:hidden;word-break:break-word}" +
+        "#pdfpage thead th{font:bold 12px Arial;text-align:center}" +
+        "#pdfpage th.dayh{font-size:13px}#pdfpage th.dayh div{line-height:1.3}" +
+        "#pdfpage th.subh{font-size:10.5px}" +
+        "#pdfpage tbody tr{height:34px}#pdfpage tbody td{height:34px}" +
+        "#pdfpage td.arname{font:bold 12.5px 'Segoe UI',Tahoma,Arial;text-align:center}" +
+        "#pdfpage td.ctr{text-align:center}#pdfpage td.ltr{direction:ltr}#pdfpage td.sigc{background:#fff}" +
+        "#pdfpage .sigimg{width:88px;height:22px;object-fit:contain;display:block;margin:0 auto;background:#fff}";
       const pageHtml = '<div id="pdfpage" dir="rtl">' +
         '<div class="pg">' +
-        '<div class="head"><img class="logo" src="logo_ngsa.jpeg" alt=""><div class="title">' + T_TITLE + "</div></div>" +
-        '<div class="dd"><span class="fld" dir="rtl">' + T_DAY + " " + dayAr + "</span><span class=\"fld\" dir=\"rtl\">" + T_DATE + "</span><span class=\"fld\" dir=\"ltr\">" + dateLabel + "</span></div>" +
+        '<div class="head"><img class="logo" src="logo_ngsa.jpeg" alt=""><div class="title">' + T_TITLE + '<div class="sub">' + T_SUB + '</div></div></div>' +
+        `<div class="weekline"><span class="fld" dir="rtl">${T_WEEK} ${wkNo}</span><span class="fld" dir="rtl">(${fmtD(d0)} - ${fmtD(d4)})</span><span class="fld" dir="ltr">${year}</span></div>` +
         '<table>' + colgroup +
-        "<thead><tr>" + headRow + "</tr></thead>" +
-        "<tbody>" + bodyRows + "</tbody>" +
-        "</table>" +
-        "</div><style>" + pageCss + "</style></div>";
+        `<thead><tr><th></th><th></th><th></th>${dayHead1}</tr><tr><th></th><th></th><th></th>${dayHead2}</tr></thead>` +
+        "<tbody>" + body + "</tbody></table></div>" +
+        "<style>" + pageCss + "</style></div>";
       const host = document.createElement("div");
       host.style.cssText = "position:fixed;left:-10000px;top:0;";
       host.innerHTML = pageHtml;
@@ -2977,15 +2993,29 @@ async function regPdf() {
       ]);
       const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false });
       const dataUrl = canvas.toDataURL("image/png");
-      const aspect = node.offsetHeight / node.offsetWidth;
+      const cW = canvas.width, cH = canvas.height;
       node = null; host.remove();
+      // A4 portrait, fit width, slice vertically across pages if taller than a page.
       const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-      const PW = 595.28, PH = 841.89, margin = 20, iw = PW - margin * 2, maxH = PH - margin * 2;
-      let h = iw * aspect;
-      if (h > maxH) { const f = maxH / h; doc.addImage(dataUrl, "PNG", (PW - iw * f) / 2, margin, iw * f, maxH); }
-      else doc.addImage(dataUrl, "PNG", margin, margin, iw, h);
-      doc.save("attendance-register-" + d + ".pdf");
-      toast("PDF downloaded");
+      const PW = 595.28, PH = 841.89, margin = 14;
+      const iw = PW - margin * 2;
+      const ih = cH / cW * iw;
+      const pageHpt = PH - margin * 2;
+      const pageHpx = pageHpt / ih * cH; // px tall per page
+      let y = 0;
+      while (y < cH) {
+        const sliceH = Math.min(cH - y, pageHpx);
+        const sl = document.createElement("canvas");
+        sl.width = cW; sl.height = sliceH;
+        sl.getContext("2d").drawImage(canvas, 0, y, cW, sliceH, 0, 0, cW, sliceH);
+        const slUrl = sl.toDataURL("image/png");
+        if (y > 0) doc.addPage();
+        const slHpt = sliceH / cW * iw;
+        doc.addImage(slUrl, "PNG", margin, margin, iw, slHpt);
+        y += sliceH;
+      }
+      doc.save("attendance-register-" + ws + ".pdf");
+      toast("PDF downloaded (week)");
     } catch (e) {
       console.error("regPdf failed", e);
       if (node) { try { node.remove(); } catch (_) {} }
@@ -2993,7 +3023,6 @@ async function regPdf() {
     }
   })();
 }
-
 
 // ---------- wire up ----------
 document.addEventListener("DOMContentLoaded", async () => {
@@ -3003,6 +3032,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   // register tab
   $("#reg-date").value = todayISO();
   $("#reg-date").addEventListener("change", () => { S_reg = null; renderRegisterScreen(); });
+  $("#reg-prev").addEventListener("click", () => {
+    const input = $("#reg-date"); const d = input.value || todayISO();
+    input.value = isoAddDays(weekKey(d), -7); S_reg = null; renderRegisterScreen();
+  });
+  $("#reg-next").addEventListener("click", () => {
+    const input = $("#reg-date"); const d = input.value || todayISO();
+    input.value = isoAddDays(weekKey(d), 7); S_reg = null; renderRegisterScreen();
+  });
   $("#reg-refresh").addEventListener("click", () => { S_reg = null; renderRegisterScreen(); });
   $("#reg-add-sig").addEventListener("click", () => openRegSigPicker());
   $("#reg-pdf").addEventListener("click", () => regPdf());
@@ -3069,7 +3106,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       await refresh();
       // Register (admin) reads from S_reg — re-fetch it so new signatures/data show up
       // without the user hitting Refresh. Only when a register day is loaded.
-      if (S_reg) { await loadRegister(S_reg.date); renderRegister(); }
+      if (S_reg) { await loadRegister($("#reg-date").value || S_reg.week_start); renderRegister(); }
     } catch (e) { } finally { S.refreshing = false; }
   }, 5000);
   // Teams/OS throttles or pauses timers while the tab is backgrounded or the phone
@@ -3086,7 +3123,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     S.refreshing = true;
     try {
       await refresh();
-      if (S_reg) { await loadRegister(S_reg.date); renderRegister(); }
+      if (S_reg) { await loadRegister($("#reg-date").value || S_reg.week_start); renderRegister(); }
     } catch (e) { } finally { S.refreshing = false; }
   };
   document.addEventListener("visibilitychange", () => { if (!document.hidden) doAutoRefresh(); });
