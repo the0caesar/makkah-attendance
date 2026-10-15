@@ -694,10 +694,13 @@ async function finishIdentity(email) {
 }
 
 // ---------- auth: MSAL (plain browser) + Teams SSO (in Teams) ----------
+// msal-browser v3+ requires `await instance.initialize()` before any token call,
+// otherwise acquireToken* throws "uninitialized_public_client_application".
+// Returns a Promise resolving to the ready (initialized) instance.
 function getMsal() {
-  if (window.__msal) return window.__msal;
-  if (!window.msal) return null;
-  window.__msal = new window.msal.PublicClientApplication({
+  if (window.__msalReady) return window.__msalReady;
+  if (!window.msal) return Promise.resolve(null);
+  const m = new window.msal.PublicClientApplication({
     auth: {
       clientId: AUTH.client_id,
       authority: "https://login.microsoftonline.com/" + AUTH.tenant,
@@ -705,7 +708,9 @@ function getMsal() {
     },
     cache: { cacheLocation: "localStorage" },
   });
-  return window.__msal;
+  window.__msal = m;
+  window.__msalReady = m.initialize().then(() => m);
+  return window.__msalReady;
 }
 async function acquireDvToken() {
   const inTeams = await teamsContextProbe();
@@ -720,7 +725,7 @@ async function acquireDvToken() {
     if (!t) throw new Error("Teams SSO returned no Dataverse token");
     return t;
   }
-  const m = getMsal();
+  const m = await getMsal();
   if (!m) throw new Error("Login library not loaded (CDN blocked?)");
   try {
     const res = await m.acquireTokenSilent({ scopes: [DV_SCOPE] });
@@ -770,7 +775,7 @@ function decodeIdTokenUpn(tok) {
 // Acquire an MSAL id token (identity) for the plain-browser case. MSAL handles the
 // PKCE #code= redirect round trip. Returns the id token (carries the UPN/email).
 async function acquireIdentityToken() {
-  const m = getMsal();
+  const m = await getMsal();
   if (!m) throw new Error("MSAL library not loaded");
   // Consume a PKCE redirect response (page reloaded back with #code=) so the
   // token is cached; no-op when there is no pending redirect.
