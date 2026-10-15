@@ -260,7 +260,8 @@ table.grid.compact td.today-col { background: #19262e; }
 #reg-table td.vac { color: var(--muted); }
 #reg-table tr.vac td { background: rgba(255,196,0,.07); }
 #reg-table tr.review td { background: rgba(255,80,80,.10); }
-#reg-table .sig-img { width: 100%; height: 100%; box-sizing: border-box; background: #fff; border-radius: 3px; object-fit: contain; display: block; }
+#reg-table .sig-img { max-width: 100%; height: auto; max-height: 20px; display: block; background: transparent; object-fit: contain; }
+#reg-table td.reg-sigcell.has-sig { background: #fff; padding: 3px 4px; }
 #reg-table .time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .reg-note { font-size: 12px; color: var(--muted); }
 .reg-flag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--red, #ff5a5a); color: #fff; letter-spacing: .3px; }
@@ -2688,7 +2689,7 @@ function renderRegister() {
       };
       const sigCell = (dir, data) => {
         if (isVac) return `<td class="reg-sigcell vac">—</td>`;
-        return `<td class="reg-sigcell" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Tap to add/edit signature">${data ? `<img class="sig-img" src="${data}" alt="">` : ""}${S.me.is_approver && data ? `<button class="btn ghost sm reg-sigclear" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Remove this signature">✕</button>` : ""}</td>`;
+        return `<td class="reg-sigcell${data ? " has-sig" : ""}" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Tap to add/edit signature">${data ? `<img class="sig-img" src="${data}" alt="">` : ""}${S.me.is_approver && data ? `<button class="btn ghost sm reg-sigclear" data-date="${dd}" data-emp="${e}" data-dir="${dir}" title="Remove this signature">✕</button>` : ""}</td>`;
       };
       cells += timeCell("in", si) + sigCell("in", sigIn) + timeCell("out", so) + sigCell("out", sigOut);
     }
