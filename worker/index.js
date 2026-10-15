@@ -1068,6 +1068,25 @@ export default {
       if (!Array.isArray(list)) list = [];
       return json(list.map(e => ({ ...e, url: url.origin + "/pdf/" + e.name })), 200, cors);
     }
+    // DELETE /api/register/pdfs/<name> — admin: delete a saved weekly PDF (file + index entry).
+    const mDel = url.pathname.match(/^\/api\/register\/pdfs\/([0-9a-z.\-]+)$/);
+    if (mDel && req.method === "DELETE") {
+      const name = mDel[1];
+      const { ident: m } = await identityFor(req, env);
+      if (!m) return json({ error: "unauthorized" }, 401, cors);
+      const adminOnly = new Set(String(env.ADMIN_ONLY_NUMBERS || "").split(",").map(s => s.trim()).filter(Boolean));
+      if (!(m.is_approver || adminOnly.has(String(m.employee_number)))) return json({ error: "admin only" }, 403, cors);
+      if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+\.pdf$/.test(name)) return json({ error: "bad name" }, 400, cors);
+      await env.REG_SIGS.delete("pdf:" + name);
+      let list = [];
+      try { list = JSON.parse((await env.REG_SIGS.get("pdfindex")) || "[]"); } catch (_) {}
+      if (Array.isArray(list)) {
+        const before = list.length;
+        list = list.filter(e => e.name !== name);
+        if (list.length !== before) await env.REG_SIGS.put("pdfindex", JSON.stringify(list));
+      }
+      return json({ deleted: name }, 200, cors);
+    }
     // /app/* — serves the web app from GitHub Pages with FRESHNESS headers, so the
     // Teams tab always gets the latest build WITHOUT a new app install. HTML: no-cache
     // (always revalidate); assets: short cache (the index.html cache-bust ?v= on
