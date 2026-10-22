@@ -1805,6 +1805,7 @@ async function refreshAll() { await loadBase(); await refresh(); }
 // ---------- screens ----------
 function showScreen(name) {
   S.screen = name;
+  if (name !== "admin") settingsFormLive = false; // leave admin -> settings re-renders fresh on next entry
   $$("#nav button").forEach(b => b.classList.toggle("active", b.dataset.screen === name));
   $$(".screen").forEach(s => (s.style.display = "none"));
   $(`#screen-${name}`).style.display = "block";
@@ -2273,6 +2274,11 @@ function renderApprovals() {
 }
 
 // ---------- admin ----------
+// Settings form stays "live": once rendered it is NEVER rebuilt by background
+// auto-refresh (every 5s) or focus-refresh — that was wiping the user's in-progress
+// edits. It is rebuilt only when the user (re)enters the settings tab or leaves
+// the Admin screen entirely (unsaved edits are dropped then, same as Cancel).
+let settingsFormLive = false;
 function renderAdmin() {
   // On-Call is owner-only (per Essam 2026-10-22): hide the button for non-owners,
   // and bounce a non-owner who somehow lands there back to Register.
@@ -2283,6 +2289,12 @@ function renderAdmin() {
   $$("#admin-tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === S.adminTab));
   $$(".admin-tab").forEach(t => (t.style.display = "none"));
   $(`#tab-${S.adminTab}`).style.display = "block";
+  if (S.adminTab === "settings") {
+    if (!settingsFormLive) renderAdminSettings();
+    settingsFormLive = true;
+    return;
+  }
+  settingsFormLive = false;
   if (S.adminTab === "sites") renderAdminSites();
   else if (S.adminTab === "oncall") renderAdminOnCall();
   else if (S.adminTab === "logs") renderAdminLogs();
@@ -2602,6 +2614,20 @@ function renderAdminSettings() {
       if (dot) dot.innerHTML = d ? '<span style="color:var(--accent,#e8a33d);font-weight:700">●</span> <span class="hint">unsaved</span>' : "";
     }
     el.querySelector("#st-status").textContent = n ? `${n} unsaved change${n > 1 ? "s" : ""}` : "All changes saved";
+    // "Save all" mirrors the dirty state: grey + disabled when nothing changed,
+    // green when there is something to save.
+    const saveBtn = el.querySelector("#st-save");
+    if (saveBtn) {
+      if (n) {
+        saveBtn.disabled = false;
+        saveBtn.style.background = "var(--green)"; saveBtn.style.color = "#06210f";
+        saveBtn.style.opacity = "1"; saveBtn.style.cursor = "pointer";
+      } else {
+        saveBtn.disabled = true;
+        saveBtn.style.background = "var(--panel2)"; saveBtn.style.color = "var(--muted)";
+        saveBtn.style.opacity = ".65"; saveBtn.style.cursor = "not-allowed";
+      }
+    }
   };
 
   // Toggles: click flips the visual state (persisted only via Save all)
@@ -2626,6 +2652,7 @@ function renderAdminSettings() {
       }
       toast(`Saved ${changed.length} setting${changed.length > 1 ? "s" : ""}`);
       await loadBase();
+      refreshDirty(); // re-check unsaved dots + Save button state against the new saved values
     } catch (e) { toast(e.message, "err"); }
   });
   // Cancel / Revert: drop unsaved edits, re-render from the last-saved values.
