@@ -30,6 +30,9 @@ body {
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   font-size: 14px;
 }
+/* Boot cover: covers everything while SSO + first data load run, so the
+   unauthenticated default page is never visible (it reads as "signed in"). */
+#boot-cover { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; letter-spacing: .3px; }
 header {
   display: flex; align-items: center; gap: 20px;
   padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
@@ -304,6 +307,7 @@ table.grid.compact td.today-col { background: #19262e; }
 
 </head>
 <body>
+<div id="boot-cover"><div>Signing in…</div></div>
 <header>
   <div class="brand">
     <span class="brand-dot"></span>
@@ -1747,6 +1751,7 @@ const stName = v => (["", "requested", "approved", "rejected", "cancelled"][v / 
 const stLabel = { 100000001: "Requested", 100000002: "Approved", 100000003: "Rejected", 100000004: "Cancelled" };
 
 // ---------- data ----------
+function hideBootCover() { const c = $("#boot-cover"); if (c) c.remove(); }
 async function loadBase() {
   const [me, roster, settings, sites] = await Promise.all([
     api("/api/whoami"), api("/api/roster"), api("/api/settings"), api("/api/sites"),
@@ -3440,11 +3445,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       ensureAuth(),
       new Promise(res => setTimeout(() => { AUTH_ERR = "sign-in timed out — please retry"; res(null); }, 30000)),
     ]);
-    if (!tok) { showAuthScreen("login"); return; }
+    if (!tok) { hideBootCover(); showAuthScreen("login"); return; }
   }
   try {
     await refreshAll();
+    hideBootCover();
   } catch (e) {
+    hideBootCover();
     if (e.code === 403 && e.detail && e.detail.email) { showAuthScreen("unlinked", e.detail.email); return; }
     if (e.code === 401 && API_BASE) { showAuthScreen("login"); return; }
     toast("Failed to load: " + e.message, "err");
