@@ -57,3 +57,15 @@ ensure in env + tables + PDF output.
 ## Scripts (scratch/)
 dv_schema.py, dv_one_record.py, dv_email_pattern.py, diff_roster2.py,
 dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.json, dv_insert_result.json
+
+## Follow-up (same day)
+- Name re-verification (verify_names.py): all 16 NEW names codepoint-exact vs the new Excel (app AR_NAMES + Dataverse new_fullname).
+  17 of the OLD 26 differ from THIS Excel file — pre-existing, sourced from the 2026 xlsb + Essam's corrections. Left untouched.
+- 97585 still absent from app + Dataverse (deliberate).
+- Admin-only removed for 63021 (Ahmad Batawi) + 68589 (Nabeel Khan):
+  * app const ADMIN_ONLY_NUMBERS = "" (live2.html)
+  * worker wrangler.jsonc ADMIN_ONLY_NUMBERS="" → redeployed (version b4351c61)
+  * commit 18bb911 on main, live-verified.
+  * Both now appear as regular members in ALL team views + register/PDF. is_approver (APPR_YES) KEPT — they can still approve.
+- Dataverse new_fullname for the 16 new = Arabic (only source was the Arabic Excel). Main-page header (#who, fed by whoami → new_fullname)
+  therefore shows Arabic for the new people, English for the old 26. Flagged to Essam; he may want English transliterations.
