@@ -69,3 +69,12 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
   * Both now appear as regular members in ALL team views + register/PDF. is_approver (APPR_YES) KEPT — they can still approve.
 - Dataverse new_fullname for the 16 new = Arabic (only source was the Arabic Excel). Main-page header (#who, fed by whoami → new_fullname)
   therefore shows Arabic for the new people, English for the old 26. Flagged to Essam; he may want English transliterations.
+
+## Names fully Arabic in the table (same day)
+- Essam asked to convert the 26 English directory names to Arabic. Source = the approved AR_NAMES list
+  (xlsb + Essam's corrections) — NOT transliteration.
+- ar_names_to_table.py PATCHed new_fullname for the 26 (16 new were already Arabic). verify_all_arabic.py:
+  42/42 table names now match AR_NAMES codepoint-exact, zero latin names remain.
+- Effect: sign-in header (#who, fed by /api/whoami -> new_fullname) now shows Arabic for everyone.
+- Directory (Graph) still not readable by the app (403) — checked; env systemusers has only the original 26,
+  none of the new 16. Auto-backfill-from-id-token idea proposed to Essam, not yet approved/implemented.
