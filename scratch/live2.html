@@ -314,8 +314,8 @@ table.grid.compact td.today-col { background: #19262e; }
   </div>
   <nav id="nav">
     <button data-screen="today" class="active">Today</button>
-    <button data-screen="requests">Requests</button>
-    <button data-screen="shifts">Shifts</button>
+    <button data-screen="requests" id="nav-requests">Requests</button>
+    <button data-screen="shifts" id="nav-shifts">Shifts</button>
     <button data-screen="approvals" id="nav-approvals" style="display:none">Approvals</button>
     <button data-screen="admin" id="nav-admin" style="display:none">Admin</button>
   </nav>
@@ -471,7 +471,7 @@ table.grid.compact td.today-col { background: #19262e; }
     <div class="tabs" id="admin-tabs">
       <button data-tab="register" class="active">Register</button>
       <button data-tab="sites">Sites</button>
-      <button data-tab="oncall">On-Call</button>
+      <button data-tab="oncall" id="admin-tab-oncall">On-Call</button>
       <button data-tab="logs">Logs</button>
       <button data-tab="people">People</button>
       <button data-tab="settings">Settings</button>
@@ -585,6 +585,7 @@ const DV_SCOPE = "https://org951b4d88.crm4.dynamics.com/.default";
 // Admin-only staff: keep full roster access + admin, hidden from all team views.
 // (Was the worker's ADMIN_ONLY_NUMBERS env var.)
 const ADMIN_ONLY_NUMBERS = "";
+const OWNER_EMPLOYEE = "70180"; // Essam — owner-only screens: Requests, Shifts, Approvals + Admin→On-Call
 const AUTH = {
   // User-facing Entra app registration "makkah-attendance" (public client, PKCE).
   // SharePoint redirect URI https://seccomsa.sharepoint.com/sites/Prot_Mak/Shared%20Documents/ProtectionPortal.html
@@ -1752,7 +1753,16 @@ async function loadBase() {
   ]);
   Object.assign(S, { me, roster, settings, sites });
   $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • admin" : ""}`;
-  $("#nav-approvals").style.display = me.is_approver ? "" : "none";
+  const isOwner = String(me.employee_number) === OWNER_EMPLOYEE;
+  // Tab visibility (per Essam 2026-10-22):
+  //  Today    -> everyone (sign-in)
+  //  Requests -> owner only
+  //  Shifts   -> owner only
+  //  Approvals-> owner only (was: all admins)
+  //  Admin    -> all admins (no change)
+  $("#nav-requests").style.display = isOwner ? "" : "none";
+  $("#nav-shifts").style.display = isOwner ? "" : "none";
+  $("#nav-approvals").style.display = isOwner ? "" : "none";
   $("#nav-admin").style.display = me.is_approver ? "" : "none";
   setSignState();
   const b = $("#banner");
@@ -2259,6 +2269,12 @@ function renderApprovals() {
 
 // ---------- admin ----------
 function renderAdmin() {
+  // On-Call is owner-only (per Essam 2026-10-22): hide the button for non-owners,
+  // and bounce a non-owner who somehow lands there back to Register.
+  const isOwner = S.me && String(S.me.employee_number) === OWNER_EMPLOYEE;
+  const ocBtn = $("#admin-tab-oncall");
+  if (ocBtn) ocBtn.style.display = isOwner ? "" : "none";
+  if (!isOwner && S.adminTab === "oncall") S.adminTab = "register";
   $$("#admin-tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === S.adminTab));
   $$(".admin-tab").forEach(t => (t.style.display = "none"));
   $(`#tab-${S.adminTab}`).style.display = "block";
