@@ -1465,8 +1465,8 @@ function humanizeSignError(e) {
   if (/outside work hours/i.test(msg)) return msg;
   if (/outside allowed locations/i.test(msg)) return msg.replace(/^blocked:\s*/i, "");
   if (/location required/i.test(msg)) return "A location is required — sign-in couldn't use your position. Try again.";
-  if (/timed out/i.test(msg)) return "Your device didn't return a location in time. Make sure location is enabled and you have signal (or use the location helper), then try again.";
-  if (/permission denied/i.test(msg)) return "Location permission is denied. Allow location access for this page in your browser, then try again.";
+  if (/timed out/i.test(msg)) return "No location from your device. On the phone: allow location to the Teams app (phone Settings → Apps → Teams → Location → allow), make sure GPS is on, then try again. The button will be ready to tap right away.";
+  if (/permission denied/i.test(msg)) return "Location permission is denied. On the phone: Settings → Apps → Teams → Location → allow (and the browser if you open it there), then try again.";
   if (/position unavailable|gps off/i.test(msg)) return "No location fix — GPS off or weak signal? Move near a window/outside, or use the location helper, then try again.";
   if (/not supported here/i.test(msg)) return "This device/browser doesn't support location — use the location helper below the sign-in buttons.";
   if (/unauthorized|sign in with your work account/i.test(msg)) return "You're not signed in — sign in at the top of the app, then try again.";
@@ -1504,9 +1504,16 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 function getLocation(ms = 15000) {
   return new Promise((res, rej) => {
     if (!navigator.geolocation) return rej(new Error("Geolocation not supported here"));
+    // WATCHDOG: some phone webviews (Android Teams) call NEITHER success nor error
+    // callback when the host app lacks the location permission — the native
+    // `timeout` option is simply ignored. That hangs the sign-in forever (stuck
+    // button, no message). Force-settle after ms+5s so the flow always ends.
+    let settled = false;
+    const finish = (fn) => (v) => { if (settled) return; settled = true; clearTimeout(w); fn(v); };
+    const w = setTimeout(() => rej(new Error("Timed out")), ms + 5000);
     navigator.geolocation.getCurrentPosition(
-      p => res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
-      e => rej(new Error({ 1: "Location permission denied", 2: "Position unavailable (GPS off?)", 3: "Timed out" }[e.code] || "Location error")),
+      p => finish(res)({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
+      e => finish(rej)(new Error({ 1: "Location permission denied", 2: "Position unavailable (GPS off?)", 3: "Timed out" }[e.code] || "Location error")),
       { enableHighAccuracy: true, timeout: ms, maximumAge: 0 });
   });
 }
