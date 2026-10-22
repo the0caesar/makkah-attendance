@@ -94,3 +94,11 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
 - Main tabs: Today = everyone; Requests / Shifts / Approvals = owner only; Admin = all admins (unchanged).
 - Admin sub-tabs: On-Call = owner only (button hidden + forced bounce to Register for non-owners).
 - UI-level hiding only (nav buttons); showScreen only fires from those buttons, so hidden = unreachable.
+
+## Settings page: refresh wipe + Save All state (commit 91c573b)
+- Root cause of "refresh clobbers settings edits": refresh() every 5s (and on focus)
+  -> renderCurrent() -> renderAdmin() -> renderAdminSettings() rebuilt the form.
+- Fix: settingsFormLive flag — settings tab never re-rendered while live; rebuilt on
+  tab entry / leaving Admin screen (unsaved edits dropped then, = Cancel semantics).
+- Save All button: grey + disabled when clean, green when dirty (refreshDirty);
+  re-evaluated after save.
