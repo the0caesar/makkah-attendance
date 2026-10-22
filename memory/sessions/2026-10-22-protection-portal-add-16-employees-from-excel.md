@@ -78,3 +78,13 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
 - Effect: sign-in header (#who, fed by /api/whoami -> new_fullname) now shows Arabic for everyone.
 - Directory (Graph) still not readable by the app (403) — checked; env systemusers has only the original 26,
   none of the new 16. Auto-backfill-from-id-token idea proposed to Essam, not yet approved/implemented.
+
+## Phone sign-in hang: Ahmad (63021) / Nabeel (68589) (same day)
+- Symptom: pad opens, no message, sign-in never registers, button stuck (can't tap again).
+- Verified: identity OK (pad only opens post-auth), sign-in path has no approver-specific code,
+  zero sign-in records for both (death is pre-POST), API_BASE = same worker origin as the page.
+- Root cause (assumption labeled): Android Teams webview silently hangs getCurrentPosition when the
+  host app lacks the Location permission — neither callback fires, native timeout ignored.
+- Fix (commit 3e90dea, live-verified): JS watchdog in getLocation() (force-settle at ms+5s=20s);
+  humanizeSignError messages now give exact phone settings steps (Settings → Apps → Teams → Location).
+- Action for Ahmad/Nabeel: grant Location to the Teams app on their phones, reload, sign in.
