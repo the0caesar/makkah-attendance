@@ -88,3 +88,9 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
 - Fix (commit 3e90dea, live-verified): JS watchdog in getLocation() (force-settle at ms+5s=20s);
   humanizeSignError messages now give exact phone settings steps (Settings → Apps → Teams → Location).
 - Action for Ahmad/Nabeel: grant Location to the Teams app on their phones, reload, sign in.
+
+## Owner-only visibility (commit 115771f)
+- OWNER_EMPLOYEE = "70180" constant added.
+- Main tabs: Today = everyone; Requests / Shifts / Approvals = owner only; Admin = all admins (unchanged).
+- Admin sub-tabs: On-Call = owner only (button hidden + forced bounce to Register for non-owners).
+- UI-level hiding only (nav buttons); showScreen only fires from those buttons, so hidden = unreachable.
