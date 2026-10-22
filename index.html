@@ -737,26 +737,47 @@ async function acquireDvToken() {
 function looksLikeTeamsUA() {
   try { return /teams/i.test(navigator.userAgent || ""); } catch (e) { return false; }
 }
+window.__teamsProbe = { hosted: null, sdk: null, uaTeams: null, tried: 0, error: null, result: null };
 async function teamsContextProbe() {
-  // Detection must NOT rely on the user-agent string: mobile Teams webviews don't
-  // always carry a "teams" token, and a tab refresh can leave the host handshake
-  // dead. Instead: if we are inside a host window (a Teams tab always is), ask the
-  // Teams SDK directly. Outside a host (plain browser) there is no parent window,
-  // so we know we're not in Teams without any SDK call.
+  // Multi-signal detection with diagnostics (window.__teamsProbe):
+  //  a) hosted — inside a host window (Teams embeds the tab; true on PC, usually mobile)
+  //  b) ua     — user-agent carries a "teams" token (some mobile webviews do)
+  // If either is true, try the Teams SDK: first the legacy v1 getContext (it starts the
+  // host handshake on its own, no explicit initialize() — a different channel), then v2
+  // initialize() x2 with a longer budget (cold mobile webviews are slow to answer).
+  // If neither signal is present we are in a plain browser — return null immediately.
+  const dbg = window.__teamsProbe;
   let inHost = false;
   try { inHost = window.parent !== window; } catch (e) {}
-  if (!inHost) return null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!(window.microsoftTeams && microsoftTeams.app && microsoftTeams.app.getContext)) return null;
+  const uaTeams = looksLikeTeamsUA();
+  const sdkPresent = !!(window.microsoftTeams);
+  dbg.hosted = inHost; dbg.uaTeams = uaTeams; dbg.sdk = sdkPresent;
+  if (!inHost && !uaTeams) { dbg.result = "plain-browser"; return null; }
+  if (!sdkPresent) { dbg.result = "no-sdk"; return null; }
+  const budgets = [6000, 8000, 8000];
+  for (let attempt = 0; attempt < budgets.length; attempt++) {
+    dbg.tried = attempt + 1;
     try {
-      const wait = attempt === 0 ? 4000 : 7000; // refresh can make the first handshake slow
-      const r = await Promise.race([
-        (async () => { await microsoftTeams.initialize(); return microsoftTeams.app.getContext(); })(),
-        new Promise(res => setTimeout(() => res(null), wait)),
-      ]);
-      if (r && (r.ssoInTeams || r.team || r.chat || r.user)) return r;
-    } catch (e) { /* retry */ }
+      let r = null;
+      if (attempt === 0 && typeof microsoftTeams.getContext === "function") {
+        r = await new Promise(res => {
+          const t = setTimeout(() => res(null), budgets[0]);
+          try { microsoftTeams.getContext(ctx => { clearTimeout(t); res(ctx || null); }); }
+          catch (e) { clearTimeout(t); res(null); }
+        });
+      } else {
+        r = await Promise.race([
+          (async () => {
+            await microsoftTeams.initialize();
+            return microsoftTeams.app ? microsoftTeams.app.getContext() : microsoftTeams.getContext();
+          })(),
+          new Promise(res => setTimeout(() => res(null), budgets[attempt])),
+        ]);
+      }
+      if (r && (r.ssoInTeams || r.team || r.chat || r.user)) { dbg.result = "ok"; return r; }
+    } catch (e) { dbg.error = String((e && e.message) || e); }
   }
+  dbg.result = "timeout";
   return null;
 }
 async function teamsSsoIdToken() {
@@ -819,6 +840,14 @@ async function ensureAuth() {
     if (!upn) { try { upn = await teamsContextEmail(); } catch (e) { console.warn("teams context identity:", e); } }
   } else {
     // Plain browser: MSAL PKCE (redirect round trip).
+    // GUARD: at the workers.dev deployment the PKCE redirect URI is NOT registered, so
+    // the redirect dead-ends the webview on a Microsoft error page (AADSTS50011) —
+    // exactly what happened on the phone. Stay on the app and show a clear error
+    // (plus the debug line) instead of navigating away.
+    if (location.hostname.indexOf("workers.dev") >= 0) {
+      AUTH_ERR = "Browser sign-in isn't available at this address — open the app from the Teams app and sign in there.";
+      return null;
+    }
     try {
       rawTok = await acquireIdentityToken();
       if (rawTok) upn = decodeIdTokenUpn(rawTok);
@@ -860,6 +889,18 @@ function showAuthScreen(mode, email) {
   const b = document.querySelector("header nav"); if (b) b.style.display = "none";
   const ae = $("#auth-err");
   if (ae) { ae.textContent = AUTH_ERR ? "Sign-in error — " + AUTH_ERR : ""; ae.style.display = AUTH_ERR ? "" : "none"; }
+  // Tiny debug line (kept): what Teams detection saw — needed to tune the phone webview.
+  let dbg = el.querySelector(".auth-debug");
+  if (!dbg) {
+    dbg = document.createElement("div");
+    dbg.className = "auth-debug";
+    dbg.style.cssText = "margin-top:10px;font-size:11px;opacity:.6;word-break:break-all;";
+    el.appendChild(dbg);
+  }
+  const d = window.__teamsProbe || {};
+  dbg.textContent = "dbg: hosted=" + d.hosted + " sdk=" + d.sdk + " ua=" + d.uaTeams
+    + " tried=" + d.tried + " result=" + d.result + (d.error ? " err=" + d.error : "")
+    + " | " + (navigator.userAgent || "").slice(0, 110);
 }
 
 // ---------- local API (1:1 port of worker handleApi; data goes straight to Dataverse) ----------
