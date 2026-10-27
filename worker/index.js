@@ -347,10 +347,16 @@ async function handleApi(env, method, path, q, body, m) {
     }
     const enforceOut = String(settings.enforce_signout_location ?? "1") === "1";
     const noLoc = lat === null || lat === undefined || lon === null || lon === undefined;
-    if (direction === DIR_IN && noLoc) return [{ error: "location required — cannot sign in without GPS" }, 400];
-    if (direction !== DIR_IN && noLoc && enforceOut) return [{ error: "location required — cannot sign out without GPS (enforced)" }, 400];
+    // Per-person "no-site" exemption (Admin → People toggle, stored in the
+    // nosite_numbers setting): these numbers sign in/out from anywhere — no
+    // GPS needed, geofence skipped. Time window above still applies to them.
+    const nosite = new Set(String(settings.nosite_numbers || "").split(",").map(s => s.trim()).filter(Boolean));
+    const nositeExempt = nosite.has(String(m.employee_number));
+    if (direction === DIR_IN && noLoc && !nositeExempt) return [{ error: "location required — cannot sign in without GPS" }, 400];
+    if (direction !== DIR_IN && noLoc && enforceOut && !nositeExempt) return [{ error: "location required — cannot sign out without GPS (enforced)" }, 400];
     let allowed, site, dist;
-    if (noLoc) { allowed = true; site = "No check (enforced off)"; dist = null; }
+    if (nositeExempt) { allowed = true; site = "No-site (exempt)"; dist = null; }
+    else if (noLoc) { allowed = true; site = "No check (enforced off)"; dist = null; }
     else {
       [allowed, site, dist] = await geoCheck(env, parseFloat(lat), parseFloat(lon));
       if (!allowed) return [

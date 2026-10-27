@@ -1752,11 +1752,16 @@ const stLabel = { 100000001: "Requested", 100000002: "Approved", 100000003: "Rej
 
 // ---------- data ----------
 function hideBootCover() { const c = $("#boot-cover"); if (c) c.remove(); }
+// "No-site" exemption list (setting nosite_numbers = comma-separated employee
+// numbers). Computed client-side so the sign-in flow can skip GPS immediately.
+function nositeSet() { return new Set(String((S.settings || {}).nosite_numbers || "").split(",").map(s => s.trim()).filter(Boolean)); }
+function nositeExempt(emp) { return emp != null && nositeSet().has(String(emp)); }
 async function loadBase() {
   const [me, roster, settings, sites] = await Promise.all([
     api("/api/whoami"), api("/api/roster"), api("/api/settings"), api("/api/sites"),
   ]);
   Object.assign(S, { me, roster, settings, sites });
+  roster.forEach(p => { p.nosite = nositeExempt(p.employee); }); // per-person no-site flag (People toggle)
   $("#who").innerHTML = `<b>${esc(me.name || me.employee_number)}</b><br>${esc(me.email || "")}${me.is_approver ? " • admin" : ""}`;
   const isOwner = String(me.employee_number) === OWNER_EMPLOYEE;
   // Tab visibility (per Essam 2026-10-22):
@@ -2510,11 +2515,12 @@ function renderAdminPeople() {
   const el = $("#tab-people");
   el.innerHTML = `
   <div class="hint" style="margin-bottom:10px">Identity linking: set the person's <b>Teams (Entra) email</b> — the app matches it to the signed-in user. Toggle who can approve. <b>Admin only</b> = keeps admin access but is hidden from all team views (managed in the worker's ADMIN_ONLY_NUMBERS).</div>
-  <table><tr><th>Name</th><th>Number</th><th>Primary email</th><th>Teams email (link)</th><th>Approver</th><th>Team</th></tr>
+  <table><tr><th>Name</th><th>Number</th><th>Primary email</th><th>Teams email (link)</th><th>Approver</th><th>No-site</th><th>Team</th></tr>
   ${S.roster.map(p => `<tr>
     <td><b>${esc(p.name)}</b></td><td>${esc(p.employee)}</td><td style="color:var(--muted);font-size:12px">${esc(p.email || "—")}</td>
     <td><input class="pe-mail" data-emp="${esc(p.employee)}" placeholder="email@company.sa" style="width:200px"></td>
     <td><span class="switch ${p.is_approver ? "on" : ""}" data-emp="${esc(p.employee)}" data-on="${p.is_approver}"></span></td>
+    <td><span class="switch ${p.nosite ? "on" : ""}" data-ns="${esc(p.employee)}" title="Sign in/out without a site — no GPS needed"></span></td>
     <td>${p.admin_only ? '<span style="color:var(--muted);font-size:12px">— admin only —</span>' : "member"}</td>
   </tr>`).join("")}
   </table>`;
@@ -2528,6 +2534,18 @@ function renderAdminPeople() {
     try {
       await api(`/api/admin/employees/${sw.dataset.emp}`, { method: "PATCH", body: { is_approver: sw.dataset.on !== "true" } });
       toast("Approver updated"); await loadBase();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  // No-site toggle: adds/removes the person's number in the nosite_numbers setting.
+  el.querySelectorAll(".switch[data-ns]").forEach(sw => sw.addEventListener("click", async () => {
+    const num = sw.dataset.ns;
+    const set = nositeSet();
+    const turningOn = !set.has(num);
+    if (turningOn) set.add(num); else set.delete(num);
+    try {
+      await api("/api/admin/settings", { method: "POST", body: { name: "nosite_numbers", value_str: [...set].join(",") } });
+      toast(turningOn ? `${num} can now sign in/out without a site` : `${num}: site check restored`);
+      await loadBase(); renderAdmin();
     } catch (e) { toast(e.message, "err"); }
   }));
 }
@@ -2682,6 +2700,10 @@ function setSignState() {
   bo.style.borderColor = "#d64545";
 }
 async function doSign(direction) {
+  // Per-person "no-site" exemption (managed in Admin → People): numbers listed
+  // in the nosite_numbers setting sign in/out from anywhere — no GPS needed,
+  // the server skips the geofence for them.
+  const nosite = nositeExempt(S.me && S.me.employee_number);
   // Guard: only allow the transition that matches current state.
   const signedIn = !!(S.me && S.me.signed_in);
   if (direction === "in" && signedIn) return toast("You're already signed in", "err");
@@ -2707,6 +2729,11 @@ async function doSign(direction) {
   // handler awaits this promise, so a signature only commits once the sign-in
   // has actually succeeded (no orphan signature if the sign-in is rejected).
   pendingSignin = (async () => {
+    if (nosite) {
+      // No-site exemption: skip GPS entirely — sign in/out from anywhere.
+      toast("Signing without a location check…");
+      return await api("/api/signin", { method: "POST", body: { direction } });
+    }
     toast("Checking location…");
     const g = await getLocation();
     return await api("/api/signin", { method: "POST", body: {
