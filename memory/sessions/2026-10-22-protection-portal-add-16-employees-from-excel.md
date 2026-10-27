@@ -102,3 +102,10 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
   tab entry / leaving Admin screen (unsaved edits dropped then, = Cancel semantics).
 - Save All button: grey + disabled when clean, green when dirty (refreshDirty);
   re-evaluated after save.
+
+## Per-person No-site exemption (app commit e0532c2, worker 2537d58c)
+- New setting `nosite_numbers` (comma-separated employee numbers) in new_settingses.
+- Admin → People page: new "No-site" toggle column (after Approver); one tap saves.
+- Worker /api/signin: exempt numbers skip the GPS requirement + geofence; site logged
+  as "No-site (exempt)". Time window still hard-blocks them.
+- Client: exempt people skip getLocation() entirely (no GPS prompt, no phone hang).
