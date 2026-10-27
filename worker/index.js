@@ -767,13 +767,32 @@ async function handleApi(env, method, path, q, body, m) {
       const b = body || {};
       const pay = {};
       if ("teams_email" in b) pay.new_teams_email = b.teams_email;
+      if ("full_name" in b) pay.new_fullname = String(b.full_name).slice(0, 100);
       if ("is_approver" in b) pay.new_employees_isapprover = b.is_approver ? APPR_YES : APPR_NO;
       const r = await call(env, "GET", `new_employeeses?$select=new_employeesid&$filter=new_employeenumber eq '${num}'`);
       if (!(r.status === 200 && isObj(r.body) && (r.body.value || []).length)) return [{ error: "employee not found" }, 404];
       const r2 = await call(env, "PATCH", `new_employeeses(${r.body.value[0].new_employeesid})`, pay);
       return r2.status === 200
         ? { ok: true }
-        : [{ error: "write failed", code: r2.status, body: String(r2.body).slice(0, 200) }, 400];
+        : [{ error: `write failed (${r2.status}): ${JSON.stringify(r2.body).slice(0, 200)}` }, 400];
+    }
+
+    if (ap === "employees" && method === "POST") {
+      const b = body || {};
+      const num = String(b.employeenumber || "").trim();
+      const name = String(b.full_name || "").trim();
+      if (!num || !name) return [{ error: "employeenumber + full_name required" }, 400];
+      const email = String(b.email || `${num}@SEC.se.com.sa`).trim();
+      const pay = {
+        new_employeenumber: num,
+        new_fullname: name,
+        new_email: email,
+        new_primaryemail: email,
+      };
+      const r = await call(env, "POST", "new_employeeses", pay);
+      return [200, 201, 204].includes(r.status)
+        ? { ok: true }
+        : [{ error: `write failed (${r.status}): ${JSON.stringify(r.body).slice(0, 200)}` }, 400];
     }
 
     if (ap === "settings" && method === "POST") {
@@ -781,20 +800,22 @@ async function handleApi(env, method, path, q, body, m) {
       const name = b.name;
       if (!name) return [{ error: "name required" }, 400];
       const r = await call(env, "GET", `new_settingses?$filter=new_name eq '${name}'`);
+      // NOTE: the table only has new_name / new_value_str / new_value — writing
+      // any other field (e.g. new_desc) makes Dataverse 400 the whole write.
       const pay = {
         new_value_str: String(b.value_str ?? "").slice(0, 200),
-        new_desc: (b.desc || "").slice(0, 300),
       };
       if (b.value !== null && b.value !== undefined) pay.new_value = String(parseInt(b.value, 10));
       if (r.status === 200 && isObj(r.body) && (r.body.value || []).length) {
         const r2 = await call(env, "PATCH", `new_settingses(${r.body.value[0].new_settingsid})`, pay);
-        return r2.status === 200 ? { ok: true } : [{ error: "write failed", code: r2.status }, 400];
+        return r2.status === 200 ? { ok: true } : [{ error: `write failed (${r2.status}): ${JSON.stringify(r2.body).slice(0, 200)}` }, 400];
       }
       pay.new_name = name;
+      if (pay.new_value === undefined) pay.new_value = "0"; // new_value is REQUIRED on create
       const r2 = await call(env, "POST", "new_settingses", pay);
       return [200, 201, 204].includes(r2.status)
         ? { ok: true }
-        : [{ error: "write failed", code: r2.status, body: String(r2.body).slice(0, 200) }, 400];
+        : [{ error: `write failed (${r2.status}): ${JSON.stringify(r2.body).slice(0, 200)}` }, 400];
     }
 
     if (ap === "signins/delete" && method === "POST") {
