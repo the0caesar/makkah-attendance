@@ -159,6 +159,10 @@ a:hover { text-decoration: underline; }
 .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
 .admin-tab table { width: 100%; border-collapse: collapse; }
 .admin-tab td, .admin-tab th { border-bottom: 1px solid var(--border); padding: 8px; font-size: 13px; text-align: left; }
+/* Two-line entries (People / Sites / Logs): the 2nd row (row2) is a continuation
+   line, so each entry fits in one phone-screen width — no horizontal scrolling. */
+.admin-tab tr.row2 td { border-top: none; padding-top: 2px; background: var(--panel2); }
+.admin-tab tr:has(+ tr.row2) td { border-bottom: none; }
 .switch { position: relative; width: 40px; height: 22px; background: var(--panel2); border: 1px solid var(--border); border-radius: 11px; cursor: pointer; display: inline-block; vertical-align: middle; }
 .switch.on { background: #1d3a24; border-color: var(--green); }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: left .15s; }
@@ -2323,19 +2327,25 @@ function renderAdminSites() {
     <button class="btn primary" type="submit">Add site</button>
   </form>
   <div class="sites-count">Total: ${S.sites.length} site(s)</div>
-  <table><tr><th class="rownum">#</th><th id="th-site-sort" style="cursor:pointer" title="Click to sort by name">Site${sortInd}</th><th>Lat</th><th>Lon</th><th>Radius (m)</th><th>Enabled</th><th></th><th></th></tr>
-  ${sitesArr.map((s, i) => `<tr>
-    <td class="rownum">${i+1}</td>
-    <td><b>${esc(s.name)}</b>${s.note ? `<div class="m" style="color:var(--muted);font-size:11px">${esc(s.note)}</div>` : ""}</td>
-    <td>${s.lat}</td><td>${s.lon}</td>
-    <td><input class="si-radius" data-id="${s.id}" value="${s.radius}" type="number" style="width:80px"></td>
-    <td><span class="switch ${s.enabled ? "on" : ""}" data-id="${s.id}" data-on="${s.enabled}"></span></td>
-    <td><button class="btn sm" data-site-map="${s.id}">🗺️ Map</button></td>
-    <td><button class="btn danger sm" data-site-del="${s.id}">Delete</button></td>
-  </tr>`).join("") || '<tr><td colspan="8">No sites yet — add one above.</td></tr>'}
+  <div style="display:flex;align-items:center;gap:10px;margin:10px 0 4px">
+    <b style="flex:1">Sites (${S.sites.length})</b>
+    <button class="btn ghost sm" id="btn-site-sort" type="button">Sort by name ${S.sitesSort === "desc" ? "↓" : "↑"}</button>
+  </div>
+  <table>
+  ${sitesArr.map((s, i) => `
+  <tr>
+    <td style="width:6%">${i+1}</td>
+    <td style="width:40%"><b>${esc(s.name)}</b>${s.note ? `<div class="m" style="color:var(--muted);font-size:11px">${esc(s.note)}</div>` : ""}</td>
+    <td style="width:26%"><span class="m" style="font-size:11px">Radius (m)</span> <input class="si-radius" data-id="${s.id}" value="${s.radius}" type="number" style="width:74px;margin-left:4px"></td>
+    <td><span class="m" style="font-size:11px">Enabled</span> <span class="switch ${s.enabled ? "on" : ""}" data-id="${s.id}" data-on="${s.enabled}" style="margin-left:6px"></span></td>
+  </tr>
+  <tr class="row2"><td colspan="4">
+    <span class="m" style="font-size:12px">Lat ${s.lat} • Lon ${s.lon}</span>
+    <span style="float:right"><button class="btn sm" data-site-map="${s.id}">🗺️ Map</button> <button class="btn danger sm" data-site-del="${s.id}">Delete</button></span>
+  </td></tr>`).join("") || '<tr><td colspan="4">No sites yet — add one above.</td></tr>'}
   </table>`;
-  const thSort = $("#th-site-sort");
-  if (thSort) thSort.addEventListener("click", () => {
+  const btnSort = $("#btn-site-sort");
+  if (btnSort) btnSort.addEventListener("click", () => {
     S.sitesSort = S.sitesSort == null ? "asc" : S.sitesSort === "asc" ? "desc" : null;
     renderAdminSites();
   });
@@ -2437,24 +2447,22 @@ function renderAdminLogs() {
     <div class="hint" style="margin-bottom:10px">Sign-in/out log (newest first). <b>Edit</b> to correct a record; <b>Delete</b> to remove it. Only admins can change logs.</div>
     ${rows.length ? `
     <table>
-      <tr><th>When (AST)</th><th>Person</th><th>Dir</th><th>Site</th><th>Allowed</th><th>Note</th><th></th></tr>
       ${rows.map((s, i) => {
         const p = person(s.employee);
         return `
         <tr>
-          <td>${fmtTime(s.at)}</td>
-          <td><b>${esc(p ? p.name : s.employee)}</b> <span class="m">${esc(s.employee)}</span></td>
-          <td>${s.direction === "in" ? "In" : "Out"}</td>
-          <td>${esc(s.site || "—")}</td>
-          <td>${s.allowed ? "✓" : "⚠"}</td>
-          <td class="m">${esc(s.note || "")}</td>
-          <td style="white-space:nowrap">
-            <button class="btn sm" data-log="edit" data-idx="${i}">Edit</button>
-            <button class="btn danger sm" data-log="del" data-idx="${i}">Delete</button>
-          </td>
+          <td style="width:24%">${fmtTime(s.at)}</td>
+          <td style="width:50%"><b>${esc(p ? p.name : s.employee)}</b> <span class="m">${esc(s.employee)}</span></td>
+          <td style="width:26%">${s.direction === "in" ? "In" : "Out"}</td>
         </tr>
+        <tr class="row2"><td colspan="3">
+          <span class="m" style="font-size:12px">Site: ${esc(s.site || "—")}</span>
+          <span style="margin-left:10px" title="${s.allowed ? "Allowed" : "Blocked"}">${s.allowed ? "✓" : "⚠"}</span>
+          ${s.note ? `<span class="m" style="font-size:12px;margin-left:10px">${esc(s.note)}</span>` : ""}
+          <span style="float:right"><button class="btn sm" data-log="edit" data-idx="${i}">Edit</button> <button class="btn danger sm" data-log="del" data-idx="${i}">Delete</button></span>
+        </td></tr>
         <tr class="log-edit" data-idx="${i}" style="display:none">
-          <td colspan="7">
+          <td colspan="3">
             <div class="inline-form">
               <label>Direction <select class="le-dir">
                 <option value="in" ${s.direction === "in" ? "selected" : ""}>In</option>
@@ -2515,13 +2523,23 @@ function renderAdminPeople() {
   const el = $("#tab-people");
   el.innerHTML = `
   <div class="hint" style="margin-bottom:10px">Identity linking: set the person's <b>Teams (Entra) email</b> — the app matches it to the signed-in user. Toggle who can approve. <b>Admin only</b> = keeps admin access but is hidden from all team views (managed in the worker's ADMIN_ONLY_NUMBERS).</div>
-  <table><tr><th>Name</th><th>Number</th><th>Primary email</th><th>Teams email (link)</th><th>Approver</th><th>No-site</th><th>Team</th></tr>
-  ${S.roster.map(p => `<tr>
-    <td><b>${esc(p.name)}</b></td><td>${esc(p.employee)}</td><td style="color:var(--muted);font-size:12px">${esc(p.email || "—")}</td>
-    <td><input class="pe-mail" data-emp="${esc(p.employee)}" placeholder="email@company.sa" style="width:200px"></td>
-    <td><span class="switch ${p.is_approver ? "on" : ""}" data-emp="${esc(p.employee)}" data-on="${p.is_approver}"></span></td>
-    <td><span class="switch ${p.nosite ? "on" : ""}" data-ns="${esc(p.employee)}" title="Sign in/out without a site — no GPS needed"></span></td>
-    <td>${p.admin_only ? '<span style="color:var(--muted);font-size:12px">— admin only —</span>' : "member"}</td>
+  <table>
+  ${S.roster.map(p => `
+  <tr>
+    <td style="width:34%"><b>${esc(p.name)}</b></td>
+    <td style="width:16%">${esc(p.employee)}</td>
+    <td style="font-size:12px;color:var(--muted)">${esc(p.email || "—")}</td>
+  </tr>
+  <tr class="row2">
+    <td colspan="3">
+      <span class="m" style="font-size:11px">Teams email</span>
+      <input class="pe-mail" data-emp="${esc(p.employee)}" placeholder="email@company.sa" style="width:185px;margin-left:6px">
+      <span class="m" style="font-size:11px;margin-left:12px">Approver</span>
+      <span class="switch ${p.is_approver ? "on" : ""}" data-emp="${esc(p.employee)}" data-on="${p.is_approver}" style="margin-left:6px"></span>
+      <span class="m" style="font-size:11px;margin-left:12px">No-site</span>
+      <span class="switch ${p.nosite ? "on" : ""}" data-ns="${esc(p.employee)}" title="Sign in/out without a site — no GPS needed" style="margin-left:6px"></span>
+      <span class="m" style="font-size:11px;margin-left:12px">${p.admin_only ? "admin only" : "member"}</span>
+    </td>
   </tr>`).join("")}
   </table>`;
   el.querySelectorAll(".pe-mail").forEach(inp => inp.addEventListener("change", async () => {
