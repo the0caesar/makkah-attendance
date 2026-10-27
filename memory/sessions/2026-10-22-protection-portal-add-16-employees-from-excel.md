@@ -109,3 +109,9 @@ dv_insert_employees.py, dv_verify_42.py, current_roster.json, missing_employees.
 - Worker /api/signin: exempt numbers skip the GPS requirement + geofence; site logged
   as "No-site (exempt)". Time window still hard-blocks them.
 - Client: exempt people skip getLocation() entirely (no GPS prompt, no phone hang).
+
+## Two-line rows for admin tables (commit 43bd666)
+- People / Sites / Logs tables converted to 2-line entries (row2 continuation class,
+  .admin-tab tr.row2 css). No horizontal scroll on phone.
+- Sites: header row replaced with "Sort by name" button (btn-site-sort).
+- Register table + main grid + On-Call + Settings left as-is (already fit).
